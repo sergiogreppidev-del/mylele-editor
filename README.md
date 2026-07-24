@@ -3,6 +3,9 @@
 App web para crear, probar y publicar los niveles de **MyLele** sin escribir SQL.
 Proyecto separado de la app de alumnos, apuntando al **mismo Supabase**.
 
+**En vivo:** https://mylele-editor-git-main-punto-gesell.vercel.app/
+**Repo:** `sergiogreppidev-del/mylele-editor` (privado) → Vercel, automático en cada push.
+
 > Herramienta interna. No es una app para alumnos.
 
 ---
