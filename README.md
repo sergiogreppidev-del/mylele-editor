@@ -51,6 +51,55 @@ Un nivel sin ningún chart publicado directamente no aparece en el mapa de nivel
 
 ---
 
+## Importar canciones con ayuda de una IA
+
+Un nivel tiene **dos capas**:
+
+- **Fondo** — una melodía que suena sola. La toca la app, el alumno no.
+- **Juego** — los acordes o notas que el alumno tiene que tocar encima.
+
+Las dos se pueden importar con el botón **✨ Importar con IA**. El ciclo es:
+
+1. **Copiar instrucciones** → arma un pedido con el formato, el compás, el tempo y los acordes
+   de este nivel ya explicados. Lo pegás en Claude o ChatGPT.
+2. **Pegar** lo que te devuelva.
+3. **Escuchar** antes de aceptar. La IA se equivoca con algunas melodías: este paso es el control
+   de calidad, no un lujo.
+
+### La notación
+
+Una sola línea. Cada elemento es `NOMBRE/DURACION`, y la duración va en **tiempos**:
+
+```
+notas     | G4/.5 G4/.5 | A4/1 G4/1 C5/1 | B4/2 r/1 |
+acordes   | C/4 | Am/4 | F/2 G/2:u | C/4 |
+```
+
+- `1` = negra · `.5` = corchea · `2` = blanca · `1.5` = negra con puntillo.
+- `r/1` es un silencio: corre el tiempo, no genera evento.
+- `|` separa compases. Si un compás no suma los tiempos que debería, el editor te dice
+  **cuál** y por cuánto se pasó.
+- `:d` / `:u` es la dirección del rasgueo (solo en acordes). Por defecto, abajo.
+- Las notas llevan octava: `G4`, `A#3`, `Bb5`.
+
+**Por qué este formato y no el JSON directo:** quien escribe solo dice qué suena y cuánto dura.
+El beat de inicio lo calcula el editor sumando duraciones, así que nunca se desfasa — que es
+justo donde una IA se equivoca cuando se le pide el JSON con los tiempos ya resueltos.
+
+El editor también acepta el **JSON** que él mismo genera, y con **"Traer lo que ya hay"**
+convierte el nivel actual a notación para pegárselo a la IA y pedirle cambios.
+
+### Del pentagrama al ukelele
+
+Si importás notas como nivel jugable, el editor traduce cada altura a **cuerda + traste**,
+eligiendo la posición más cómoda. El ukelele llega de **C4 a A5**: si la melodía es más grave,
+la sube de octava sola y te avisa. Si abarca más de lo que entra, te lo dice en vez de guardar
+algo intocable.
+
+En el **fondo** no hay esa restricción: como lo sintetiza la app, puede ir en cualquier octava.
+
+---
+
 ## Reglas del formato (no se negocian)
 
 Los tiempos van **siempre en beats**, nunca en segundos.

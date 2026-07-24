@@ -9,7 +9,8 @@
    que se escucha en el editor sea lo mismo que va a escuchar el alumno.
    =================================================================== */
 
-import type { ChordEvent } from './chartFormat';
+import type { BackingEvent, ChordEvent } from './chartFormat';
+import { pitchToMidi } from './notation';
 
 /** pitch classes por acorde, tal como vienen de la tabla `chords`. */
 export type ChordPcs = Record<string, number[]>;
@@ -19,6 +20,8 @@ export interface PlayOptions {
   bpm: number;
   beatsPerBar: number;
   chordPcs: ChordPcs;
+  /** Melodía de acompañamiento importada (la toca la app, no el alumno). */
+  backingNotes?: BackingEvent[];
   countInBars?: number;
   metronome?: boolean;
   backing?: boolean;
@@ -135,11 +138,26 @@ export class PreviewAudio {
     }
   }
 
+  /**
+   * Melodía de fondo. Suena más fuerte y con otro timbre que el "chop" del groove
+   * para que se distinga de lo que el alumno tiene que tocar.
+   */
+  private scheduleBackingMelody(notes: BackingEvent[], startTime: number, countInBeats: number, beatDur: number) {
+    for (const n of notes) {
+      const midi = pitchToMidi(n.pitch);
+      if (midi === null) continue;
+      const freq = 440 * Math.pow(2, (midi - 69) / 12);
+      const at = startTime + (countInBeats + n.t) * beatDur;
+      // 0.9 en vez de 1: deja un respiro entre notas para que no suene ligado.
+      this.playSynth(at, freq, Math.max(0.08, n.dur * beatDur * 0.9), 'sine', 0.2);
+    }
+  }
+
   play(opts: PlayOptions) {
     this.stop();
     const ctx = this.ensureCtx();
     const {
-      events, bpm, beatsPerBar, chordPcs,
+      events, bpm, beatsPerBar, chordPcs, backingNotes = [],
       countInBars = 1, metronome = true, backing = true,
       onBeat, onEnd,
     } = opts;
@@ -147,7 +165,11 @@ export class PreviewAudio {
     const beatDur = 60 / bpm;
     const countInBeats = countInBars * beatsPerBar;
     const startTime = ctx.currentTime + 0.25;
-    const lastBeat = events.reduce((m, e) => Math.max(m, e.t + (e.dur || 1)), 0);
+    // El nivel dura lo que dure la capa más larga: el fondo puede pasarse de lo jugable.
+    const lastBeat = Math.max(
+      events.reduce((m, e) => Math.max(m, e.t + (e.dur || 1)), 0),
+      backingNotes.reduce((m, e) => Math.max(m, e.t + (e.dur || 1)), 0),
+    );
     const totalBeats = countInBeats + Math.ceil(lastBeat);
 
     if (metronome) {
@@ -158,6 +180,7 @@ export class PreviewAudio {
     if (backing) {
       this.scheduleBacking(events, startTime, countInBeats, beatDur, chordPcs);
       this.scheduleStrums(events, startTime, countInBeats, beatDur, chordPcs);
+      this.scheduleBackingMelody(backingNotes, startTime, countInBeats, beatDur);
     }
 
     this.playing = true;

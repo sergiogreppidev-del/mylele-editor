@@ -1,0 +1,4 @@
+{
+  "//": "El proyecto es ESM, pero las pruebas se compilan a CommonJS para correrlas con Node sin depender de nada. Este archivo marca esta carpeta como CommonJS.",
+  "type": "commonjs"
+}

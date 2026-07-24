@@ -1,8 +1,8 @@
 /* Todas las consultas a Supabase en un solo lugar. */
 
 import { supabase } from './supabase';
-import { parseEvents, serializeEvents } from './chartFormat';
-import type { ChartEvent, ChartMode, Song } from './chartFormat';
+import { BACKING_MODE, parseBacking, parseEvents, serializeBacking, serializeEvents } from './chartFormat';
+import type { AnyChartMode, BackingEvent, ChartEvent, ChartMode, Song } from './chartFormat';
 
 export interface ChordRow {
   id: string;
@@ -15,10 +15,13 @@ export interface ChordRow {
 export interface ChartRow {
   id: string;
   song_id: string;
-  mode: ChartMode;
+  mode: AnyChartMode;
   version: number;
-  events: ChartEvent[];
   published: boolean;
+  /** Eventos jugables. Vacío cuando el chart es la capa de fondo. */
+  events: ChartEvent[];
+  /** Notas del acompañamiento. Vacío salvo que el modo sea 'backing'. */
+  backing: BackingEvent[];
 }
 
 export interface SongRow extends Song {
@@ -74,7 +77,12 @@ function normalizeSongRow(raw: unknown): SongRow {
   return {
     ...r,
     bpm: Number(r.bpm),
-    charts: (r.charts ?? []).map((c) => ({ ...c, events: parseEvents(c.events) })),
+    charts: (r.charts ?? []).map((c) => ({
+      ...c,
+      // El mismo campo jsonb guarda dos formas distintas según el modo.
+      events: c.mode === BACKING_MODE ? [] : parseEvents(c.events),
+      backing: c.mode === BACKING_MODE ? parseBacking(c.events) : [],
+    })),
   };
 }
 
@@ -121,11 +129,14 @@ function stripSong(s: Song) {
  */
 export async function saveDraft(
   songId: string,
-  mode: ChartMode,
-  events: ChartEvent[],
+  mode: AnyChartMode,
+  events: ChartEvent[] | BackingEvent[],
   existingCharts: ChartRow[],
 ): Promise<ChartRow> {
-  const clean = serializeEvents(events);
+  const clean =
+    mode === BACKING_MODE
+      ? serializeBacking(events as BackingEvent[])
+      : serializeEvents(events as ChartEvent[]);
   const sameMode = existingCharts.filter((c) => c.mode === mode);
   const draft = sameMode.filter((c) => !c.published).sort((a, b) => b.version - a.version)[0];
 
@@ -147,7 +158,16 @@ export async function saveDraft(
     .select()
     .single();
   if (error) throw error;
-  return { ...(data as ChartRow), events: parseEvents((data as ChartRow).events) };
+  return normalizeChartRow(data);
+}
+
+function normalizeChartRow(raw: unknown): ChartRow {
+  const c = raw as ChartRow;
+  return {
+    ...c,
+    events: c.mode === BACKING_MODE ? [] : parseEvents(c.events),
+    backing: c.mode === BACKING_MODE ? parseBacking(c.events) : [],
+  };
 }
 
 /** Pone un chart en vivo. La función de la base baja el anterior en la misma transacción. */
@@ -178,19 +198,26 @@ export async function duplicateSong(source: SongRow): Promise<SongRow> {
     title: `${source.title} (copia)`,
   });
 
-  // Se copia el chart que está en vivo; si no hay, el borrador más nuevo.
-  const src =
-    source.charts.find((c) => c.published) ??
-    [...source.charts].sort((a, b) => b.version - a.version)[0];
+  // Se copian todas las capas del nivel (lo jugable y el fondo). De cada una,
+  // la que está en vivo; si no hay, el borrador más nuevo.
+  const modes = [...new Set(source.charts.map((c) => c.mode))];
+  const rows = modes
+    .map((mode) => {
+      const same = source.charts.filter((c) => c.mode === mode);
+      const src = same.find((c) => c.published) ?? [...same].sort((a, b) => b.version - a.version)[0];
+      if (!src) return null;
+      return {
+        song_id: created.id,
+        mode,
+        version: 1,
+        events: mode === BACKING_MODE ? serializeBacking(src.backing) : serializeEvents(src.events),
+        published: false, // la copia arranca como borrador: no aparece en la app de alumnos
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
 
-  if (src) {
-    const { error } = await supabase.from('charts').insert({
-      song_id: created.id,
-      mode: src.mode,
-      version: 1,
-      events: serializeEvents(src.events),
-      published: false, // la copia arranca como borrador: no aparece en la app de alumnos
-    });
+  if (rows.length > 0) {
+    const { error } = await supabase.from('charts').insert(rows);
     if (error) throw error;
   }
   return getSong(created.id);
@@ -199,17 +226,26 @@ export async function duplicateSong(source: SongRow): Promise<SongRow> {
 /* ---------------- Ayudas ---------------- */
 
 /** El chart que está editando el editor: el borrador si existe, si no el publicado. */
-export function workingChart(song: SongRow, mode: ChartMode): ChartRow | null {
+export function workingChart(song: SongRow, mode: AnyChartMode): ChartRow | null {
   const same = song.charts.filter((c) => c.mode === mode);
   const draft = same.filter((c) => !c.published).sort((a, b) => b.version - a.version)[0];
   return draft ?? same.find((c) => c.published) ?? null;
 }
 
-export function publishedChart(song: SongRow, mode: ChartMode): ChartRow | null {
+export function publishedChart(song: SongRow, mode: AnyChartMode): ChartRow | null {
   return song.charts.find((c) => c.mode === mode && c.published) ?? null;
 }
 
-/** El modo de un nivel: el del chart que tenga. Por defecto, acordes. */
+/**
+ * El modo JUGABLE de un nivel. Ojo: hay que ignorar la capa de fondo, porque
+ * un nivel puede tener las dos y el fondo no es lo que toca el alumno.
+ */
 export function songMode(song: SongRow): ChartMode {
-  return song.charts[0]?.mode ?? 'chords';
+  const playable = song.charts.find((c) => c.mode !== BACKING_MODE);
+  return (playable?.mode as ChartMode) ?? 'chords';
+}
+
+/** ¿Este nivel tiene acompañamiento cargado? */
+export function hasBacking(song: SongRow): boolean {
+  return song.charts.some((c) => c.mode === BACKING_MODE && c.backing.length > 0);
 }

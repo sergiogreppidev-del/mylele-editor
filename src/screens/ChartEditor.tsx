@@ -6,11 +6,15 @@ import { Issues } from '../components/Issues';
 import { JsonPanel } from '../components/JsonPanel';
 import { PreviewAudio } from '../lib/previewAudio';
 import type { ChordPcs } from '../lib/previewAudio';
+import { BackingLane } from '../components/BackingLane';
+import { ImportDialog } from '../components/ImportDialog';
+import { validateBacking } from '../lib/notation';
+import type { NotationTarget } from '../lib/notation';
 import {
-  BPM_MAX, BPM_MIN, barCount, beatsPerBar, chartLengthBeats, dirForBeat,
+  BACKING_MODE, BPM_MAX, BPM_MIN, barCount, beatsPerBar, chartLengthBeats, dirForBeat,
   hasErrors, tidy, validateChart, validateSong,
 } from '../lib/chartFormat';
-import type { ChartMode, ChordEvent, Song, StrumPattern } from '../lib/chartFormat';
+import type { BackingEvent, ChartMode, ChordEvent, Song, StrumPattern } from '../lib/chartFormat';
 import {
   EMPTY_SONG, discardDraft, getSong, insertSong, publishChart, publishedChart,
   saveDraft, songMode, updateSong, workingChart,
@@ -44,6 +48,8 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   const [loaded, setLoaded] = useState<SongRow | null>(null);
   const [mode, setMode] = useState<ChartMode>('chords');
   const [events, setEvents] = useState<ChordEvent[]>([]);
+  const [backingNotes, setBackingNotes] = useState<BackingEvent[]>([]);
+  const [importTarget, setImportTarget] = useState<NotationTarget | null>(null);
 
   const [brush, setBrush] = useState<string | null>(chords[0]?.id ?? null);
   const [selected, setSelected] = useState<number | null>(null);
@@ -71,6 +77,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
     if (!songId) {
       setSong({ ...EMPTY_SONG });
       setEvents([]);
+      setBackingNotes([]);
       setLoaded(null);
       setMode('chords');
       return;
@@ -86,6 +93,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
         setMode(m);
         setSong({ ...row });
         setEvents((work?.events ?? []).filter((e): e is ChordEvent => 'chord' in e));
+        setBackingNotes(workingChart(row, BACKING_MODE)?.backing ?? []);
         setDirty(false);
       } catch (e) {
         if (alive) setError(friendlyError(e));
@@ -97,7 +105,11 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   }, [songId]);
 
   const bpb = beatsPerBar(song.time_sig);
-  const bars = useMemo(() => barCount(events, song.time_sig, minBars), [events, song.time_sig, minBars]);
+  // La grilla se estira a la capa más larga: el fondo puede pasarse de lo jugable.
+  const bars = useMemo(
+    () => Math.max(barCount(events, song.time_sig, minBars), barCount(backingNotes, song.time_sig, minBars)),
+    [events, backingNotes, song.time_sig, minBars],
+  );
 
   const chordPcs: ChordPcs = useMemo(() => {
     const map: ChordPcs = {};
@@ -110,7 +122,8 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
     () => validateChart(events, mode, { knownChords: chords.map((c) => c.id), timeSig: song.time_sig }),
     [events, mode, chords, song.time_sig],
   );
-  const allIssues = [...songIssues, ...chartIssues];
+  const backingIssues = useMemo(() => validateBacking(backingNotes), [backingNotes]);
+  const allIssues = [...songIssues, ...chartIssues, ...backingIssues];
   const blocked = hasErrors(allIssues);
 
   const liveChart: ChartRow | null = loaded ? publishedChart(loaded, mode) : null;
@@ -123,6 +136,10 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   }
   function setEv(next: ChordEvent[]) {
     setEvents(next);
+    setDirty(true);
+  }
+  function applyBacking(next: BackingEvent[]) {
+    setBackingNotes(next);
     setDirty(true);
   }
 
@@ -183,10 +200,13 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   }
 
   /* ---------- reproducción ---------- */
-  function play() {
-    if (events.length === 0) return;
+  function play(overrideChords?: ChordEvent[], overrideBacking?: BackingEvent[]) {
+    const evs = overrideChords ?? events;
+    const bck = overrideBacking ?? backingNotes;
+    if (evs.length === 0 && bck.length === 0) return;
     audio.current?.play({
-      events,
+      events: evs,
+      backingNotes: bck,
       bpm: song.bpm,
       beatsPerBar: bpb,
       chordPcs,
@@ -229,6 +249,14 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       const draft = await saveDraft(sid, mode, events, existing);
       if (publish) await publishChart(draft.id);
 
+      // El fondo es un chart aparte, con su propia versión y su propio publicado.
+      // Solo se toca si hay notas o si ya existía (para poder vaciarlo).
+      const hadBacking = existing.some((c) => c.mode === BACKING_MODE);
+      if (backingNotes.length > 0 || hadBacking) {
+        const bDraft = await saveDraft(sid, BACKING_MODE, backingNotes, existing);
+        if (publish) await publishChart(bDraft.id);
+      }
+
       const fresh = await getSong(sid);
       setLoaded(fresh);
       setDirty(false);
@@ -253,6 +281,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       setLoaded(fresh);
       const work = workingChart(fresh, mode);
       setEvents((work?.events ?? []).filter((e): e is ChordEvent => 'chord' in e));
+      setBackingNotes(workingChart(fresh, BACKING_MODE)?.backing ?? []);
       setDirty(false);
       setFlash('Borrador descartado.');
       await onReload();
@@ -378,8 +407,11 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
         <>
           {/* ---------- paleta ---------- */}
           <div className="card">
-            <div className="section-title" style={{ marginBottom: 10 }}>
-              Acordes · elegí uno y hacé clic en la grilla
+            <div className="row" style={{ marginBottom: 10 }}>
+              <div className="section-title grow">Acordes · elegí uno y hacé clic en la grilla</div>
+              <CandyButton small tone="sun" onClick={() => setImportTarget('chords')}>
+                ✨ Importar con IA
+              </CandyButton>
             </div>
             <ChordPalette chords={chords} selected={brush} onSelect={setBrush} />
           </div>
@@ -546,13 +578,59 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
             </div>
           </div>
 
+          {/* ---------- fondo ---------- */}
+          <div className="card">
+            <div className="row" style={{ marginBottom: 10 }}>
+              <div className="section-title grow">
+                Fondo · melodía que suena sola (el alumno no la toca)
+              </div>
+              <CandyButton small tone="sun" onClick={() => setImportTarget('backing')}>
+                ✨ Importar con IA
+              </CandyButton>
+              {backingNotes.length > 0 && (
+                <CandyButton
+                  small
+                  tone="melon"
+                  onClick={() => {
+                    if (window.confirm('¿Sacar la melodía de fondo de este nivel?')) applyBacking([]);
+                  }}
+                >
+                  Quitar
+                </CandyButton>
+              )}
+            </div>
+
+            {backingNotes.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>
+                Sin acompañamiento. Sirve para que el alumno toque encima de una melodía conocida —
+                por ejemplo, pedirle a una IA "Feliz cumpleaños" y poner los acordes arriba.
+              </p>
+            ) : (
+              <>
+                <BackingLane
+                  notes={backingNotes}
+                  pxPerBeat={pxPerBeat}
+                  totalBeats={bars * bpb}
+                  cursorBeat={cursorBeat}
+                />
+                <span className="muted">
+                  {backingNotes.length} notas · {tidy(chartLengthBeats(backingNotes))} tiempos
+                </span>
+              </>
+            )}
+          </div>
+
           {/* ---------- reproducción de prueba ---------- */}
           <div className="card">
             <div className="section-title" style={{ marginBottom: 10 }}>
               Escuchar (sin micrófono — solo para validar que suene y se lea bien)
             </div>
             <div className="row">
-              <CandyButton tone="lime" onClick={play} disabled={events.length === 0}>
+              <CandyButton
+                tone="lime"
+                onClick={() => play()}
+                disabled={events.length === 0 && backingNotes.length === 0}
+              >
                 ▶ Reproducir
               </CandyButton>
               <CandyButton tone="ghost" onClick={stop}>
@@ -577,6 +655,32 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
             </div>
           </div>
         </>
+      )}
+
+      {importTarget && (
+        <ImportDialog
+          target={importTarget}
+          title={song.title}
+          bpm={song.bpm}
+          timeSig={song.time_sig}
+          beatsPerBar={bpb}
+          bars={bars}
+          knownChords={chords.map((c) => c.id)}
+          currentChords={events}
+          currentBacking={backingNotes}
+          onPreview={(c, b) => play(importTarget === 'backing' ? events : c, importTarget === 'backing' ? b : backingNotes)}
+          onApply={(r) => {
+            if (r.chords) setEv(r.chords);
+            if (r.backing) applyBacking(r.backing);
+            setSelected(null);
+            setImportTarget(null);
+            stop();
+          }}
+          onClose={() => {
+            setImportTarget(null);
+            stop();
+          }}
+        />
       )}
 
       <Issues issues={allIssues} />

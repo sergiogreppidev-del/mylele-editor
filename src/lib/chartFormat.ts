@@ -9,7 +9,11 @@
      y dibuja el número de traste dentro del círculo.
    =================================================================== */
 
+/** Lo que toca el alumno. El fondo va aparte, en `BackingMode`. */
 export type ChartMode = 'chords' | 'melody';
+/** Capa de acompañamiento: la reproduce la app, el alumno no la toca. */
+export const BACKING_MODE = 'backing';
+export type AnyChartMode = ChartMode | typeof BACKING_MODE;
 export type StrumDir = 'd' | 'u';
 export type UkeString = 'G' | 'C' | 'E' | 'A';
 
@@ -32,6 +36,17 @@ export interface MelodyEvent {
   dur: number;
 }
 export type ChartEvent = ChordEvent | MelodyEvent;
+
+/**
+ * Nota del acompañamiento. Guarda la ALTURA (`pitch`) y no la digitación,
+ * porque no la toca nadie: la sintetiza la app. Por eso puede estar en
+ * cualquier octava, sin la restricción de trastes del ukelele.
+ */
+export interface BackingEvent {
+  t: number;
+  pitch: string;
+  dur: number;
+}
 
 export function isChordEvent(e: ChartEvent): e is ChordEvent {
   return (e as ChordEvent).chord !== undefined;
@@ -68,13 +83,16 @@ export function beatsPerBar(timeSig: string): number {
   return Number.isFinite(n) && n >= 1 && n <= 16 ? n : 4;
 }
 
-/** Último beat ocupado por el chart (donde termina el nivel). */
-export function chartLengthBeats(events: ChartEvent[]): number {
+/** Cualquier cosa que ocupe un tramo de tiempo: evento jugable o nota de fondo. */
+type Timed = { t: number; dur: number };
+
+/** Último beat ocupado (donde termina la capa). */
+export function chartLengthBeats(events: Timed[]): number {
   return events.reduce((max, e) => Math.max(max, e.t + e.dur), 0);
 }
 
 /** Cantidad de compases a dibujar: los que ocupa el chart, con un mínimo. */
-export function barCount(events: ChartEvent[], timeSig: string, minBars = 4): number {
+export function barCount(events: Timed[], timeSig: string, minBars = 4): number {
   const bpb = beatsPerBar(timeSig);
   return Math.max(minBars, Math.ceil(chartLengthBeats(events) / bpb) || minBars);
 }
@@ -246,6 +264,22 @@ export function serializeEvents(events: ChartEvent[]): ChartEvent[] {
         ? ({ t: tidy(e.t), chord: e.chord, dur: tidy(e.dur), dir: e.dir } as ChordEvent)
         : ({ t: tidy(e.t), string: e.string, fret: e.fret, dur: tidy(e.dur) } as MelodyEvent),
     );
+}
+
+export function serializeBacking(events: BackingEvent[]): BackingEvent[] {
+  return [...events]
+    .sort((a, b) => a.t - b.t)
+    .map((e) => ({ t: tidy(e.t), pitch: e.pitch, dur: tidy(e.dur) }));
+}
+
+export function parseBacking(raw: unknown): BackingEvent[] {
+  if (!Array.isArray(raw)) return [];
+  const out: BackingEvent[] = [];
+  for (const r of raw as Record<string, unknown>[]) {
+    if (!r || typeof r !== 'object' || typeof r.pitch !== 'string') continue;
+    out.push({ t: Number(r.t) || 0, pitch: r.pitch, dur: Number(r.dur) || 1 });
+  }
+  return out;
 }
 
 /** Lee lo que hay en la base, tolerando charts viejos sin `dir`. */
