@@ -120,8 +120,30 @@ no lo dibuja ni lo detecta.
 Se escribe **cuerda + traste**, nunca el nombre de la nota: la app calcula la nota sola y
 dibuja el número de traste. Cuerdas de arriba hacia abajo: **G · C · E · A**.
 
-> El editor visual de notas llega en la fase 2. Por ahora los niveles en modo notas se pueden
-> ver y editar en su ficha, pero no en la grilla.
+En el editor esto se dibuja en **cuatro carriles**, uno por cuerda (G · C · E · A de arriba
+hacia abajo, igual que en la pista del juego). Elegís un traste de la paleta y hacés clic en la
+cuerda; con una nota seleccionada, los números del teclado le cambian el traste y las flechas ↑↓
+la mueven de cuerda.
+
+Si importás una melodía por altura (`G4`, `C5`…), el editor la traduce solo a cuerda y traste,
+eligiendo la posición más cómoda.
+
+---
+
+## Acordes
+
+La pestaña **🎸 Acordes** es el ABM del catálogo: alta, edición y borrado con el diagrama de
+digitación, para sumar D, Em, G7 y compañía sin escribir SQL.
+
+Las **notas del acorde** (lo que el motor de audio busca para detectarlo) se deducen del nombre
+—`G7` → G · B · D · F— y se verifican contra los trastes que dibujaste. Si la digitación no da
+esas notas, el editor te dice cuál falta y no deja guardar.
+
+> ⚠️ **La detección de un acorde nuevo no está probada.** El motor de audio está calibrado con
+> grabaciones reales solo para C, Am, F y G. Antes de armar un nivel con un acorde nuevo, entrá
+> a la app de alumnos, afiná, y comprobá en la pantalla de acordes que lo reconoce.
+
+Un acorde que esté en uso no se puede borrar: el editor te dice en qué niveles aparece.
 
 ---
 

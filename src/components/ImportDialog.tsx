@@ -17,8 +17,9 @@ interface Props {
   knownChords: string[];
   /** Eventos actuales, para ofrecer "agregar al final" y exportar. */
   currentChords: ChordEvent[];
+  currentMelody: MelodyEvent[];
   currentBacking: BackingEvent[];
-  onPreview: (chords: ChordEvent[], backing: BackingEvent[]) => void;
+  onPreview: (playable: (ChordEvent | MelodyEvent)[], backing: BackingEvent[]) => void;
   onApply: (result: { chords?: ChordEvent[]; melody?: MelodyEvent[]; backing?: BackingEvent[] }) => void;
   onClose: () => void;
 }
@@ -36,12 +37,15 @@ export function ImportDialog(props: Props) {
   const [mode, setMode] = useState<Mode>('replace');
   const [copied, setCopied] = useState(false);
 
+  /** La capa que se está importando, tal como está ahora. */
+  const current: { t: number; dur: number }[] =
+    target === 'backing' ? props.currentBacking : target === 'melody' ? props.currentMelody : props.currentChords;
+
   const currentEnd = useMemo(() => {
-    const list = target === 'backing' ? props.currentBacking : props.currentChords;
-    const end = list.reduce((m, e) => Math.max(m, e.t + e.dur), 0);
+    const end = current.reduce((m, e) => Math.max(m, e.t + e.dur), 0);
     // Al agregar al final se arranca en el compás siguiente, no pegado a la última nota.
     return Math.ceil(end / beatsPerBar) * beatsPerBar;
-  }, [props.currentBacking, props.currentChords, target, beatsPerBar]);
+  }, [current, beatsPerBar]);
 
   const parsed = useMemo(() => {
     const trimmed = text.trim();
@@ -108,8 +112,7 @@ export function ImportDialog(props: Props) {
   }
 
   function exportCurrent() {
-    const list = target === 'backing' ? props.currentBacking : props.currentChords;
-    setText(toNotation(list, beatsPerBar));
+    setText(toNotation(current as never, beatsPerBar));
   }
 
   return (
@@ -159,6 +162,7 @@ export function ImportDialog(props: Props) {
                 ? '| C/4 | Am/4 | F/4 | G/4 |'
                 : '| G4/.5 G4/.5 A4/1 G4/1 | C5/1 B4/2 r/1 |'
             }
+            spellCheck={false}
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
@@ -180,7 +184,11 @@ export function ImportDialog(props: Props) {
             <Issues issues={parsed.issues} />
             {canApply && (
               <div className="row" style={{ marginTop: 8 }}>
-                <CandyButton small tone="lime" onClick={() => props.onPreview(shifted.chords, shifted.backing)}>
+                <CandyButton
+                  small
+                  tone="lime"
+                  onClick={() => props.onPreview([...shifted.chords, ...shifted.melody], shifted.backing)}
+                >
                   ▶ Escuchar
                 </CandyButton>
                 <label className="row" style={{ gap: 6 }}>
@@ -212,12 +220,13 @@ export function ImportDialog(props: Props) {
             disabled={!canApply}
             onClick={() => {
               if (!parsed) return;
+              const add = mode === 'append';
               props.onApply(
                 target === 'backing'
-                  ? { backing: mode === 'append' ? [...props.currentBacking, ...shifted.backing] : shifted.backing }
+                  ? { backing: add ? [...props.currentBacking, ...shifted.backing] : shifted.backing }
                   : target === 'chords'
-                    ? { chords: mode === 'append' ? [...props.currentChords, ...shifted.chords] : shifted.chords }
-                    : { melody: shifted.melody },
+                    ? { chords: add ? [...props.currentChords, ...shifted.chords] : shifted.chords }
+                    : { melody: add ? [...props.currentMelody, ...shifted.melody] : shifted.melody },
               );
             }}
           >

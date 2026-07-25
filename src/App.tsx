@@ -7,8 +7,9 @@ import { CandyButton } from './components/CandyButton';
 import { Login } from './screens/Login';
 import { LevelList } from './screens/LevelList';
 import { ChartEditor } from './screens/ChartEditor';
+import { ChordsAdmin } from './screens/ChordsAdmin';
 
-type Route = { name: 'list' } | { name: 'editor'; songId: string | null };
+type Route = { name: 'list' } | { name: 'editor'; songId: string | null } | { name: 'chords' };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -55,6 +56,13 @@ export default function App() {
         <h1>MyLele Editor</h1>
         <span className="badge mode">{isAdmin ? 'Editor' : 'Solo lectura'}</span>
         <div className="spacer" />
+        <CandyButton
+          small
+          tone={route.name === 'chords' ? 'sun' : 'ghost'}
+          onClick={() => setRoute(route.name === 'chords' ? { name: 'list' } : { name: 'chords' })}
+        >
+          🎸 Acordes
+        </CandyButton>
         <span className="who">{session.user.email}</span>
         <CandyButton small tone="ghost" onClick={() => void supabase.auth.signOut()}>
           Salir
@@ -70,7 +78,15 @@ export default function App() {
         )}
         {error && <div className="notice bad">{error}</div>}
 
-        {route.name === 'list' ? (
+        {route.name === 'chords' ? (
+          <ChordsAdmin
+            chords={chords}
+            songs={songs}
+            canEdit={isAdmin}
+            onBack={() => setRoute({ name: 'list' })}
+            onReload={reload}
+          />
+        ) : route.name === 'list' ? (
           <LevelList
             songs={songs}
             canEdit={isAdmin}

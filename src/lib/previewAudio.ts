@@ -9,8 +9,8 @@
    que se escucha en el editor sea lo mismo que va a escuchar el alumno.
    =================================================================== */
 
-import type { BackingEvent, ChordEvent } from './chartFormat';
-import { pitchToMidi } from './notation';
+import type { BackingEvent, ChordEvent, MelodyEvent } from './chartFormat';
+import { STRING_MIDI, pitchToMidi } from './notation';
 
 /** pitch classes por acorde, tal como vienen de la tabla `chords`. */
 export type ChordPcs = Record<string, number[]>;
@@ -20,6 +20,8 @@ export interface PlayOptions {
   bpm: number;
   beatsPerBar: number;
   chordPcs: ChordPcs;
+  /** Notas sueltas que toca el alumno, en tablatura. */
+  melodyNotes?: MelodyEvent[];
   /** Melodía de acompañamiento importada (la toca la app, no el alumno). */
   backingNotes?: BackingEvent[];
   countInBars?: number;
@@ -153,11 +155,24 @@ export class PreviewAudio {
     }
   }
 
+  /**
+   * Las notas que toca el alumno, para escuchar cómo suena la melodía del nivel.
+   * Timbre distinto del fondo, así se distingue lo propio de lo ajeno.
+   */
+  private scheduleMelody(notes: MelodyEvent[], startTime: number, countInBeats: number, beatDur: number) {
+    for (const n of notes) {
+      const midi = STRING_MIDI[n.string] + n.fret;
+      const freq = 440 * Math.pow(2, (midi - 69) / 12);
+      const at = startTime + (countInBeats + n.t) * beatDur;
+      this.playSynth(at, freq, Math.max(0.1, n.dur * beatDur * 0.9), 'triangle', 0.22);
+    }
+  }
+
   play(opts: PlayOptions) {
     this.stop();
     const ctx = this.ensureCtx();
     const {
-      events, bpm, beatsPerBar, chordPcs, backingNotes = [],
+      events, bpm, beatsPerBar, chordPcs, backingNotes = [], melodyNotes = [],
       countInBars = 1, metronome = true, backing = true,
       onBeat, onEnd,
     } = opts;
@@ -168,6 +183,7 @@ export class PreviewAudio {
     // El nivel dura lo que dure la capa más larga: el fondo puede pasarse de lo jugable.
     const lastBeat = Math.max(
       events.reduce((m, e) => Math.max(m, e.t + (e.dur || 1)), 0),
+      melodyNotes.reduce((m, e) => Math.max(m, e.t + (e.dur || 1)), 0),
       backingNotes.reduce((m, e) => Math.max(m, e.t + (e.dur || 1)), 0),
     );
     const totalBeats = countInBeats + Math.ceil(lastBeat);
@@ -182,6 +198,8 @@ export class PreviewAudio {
       this.scheduleStrums(events, startTime, countInBeats, beatDur, chordPcs);
       this.scheduleBackingMelody(backingNotes, startTime, countInBeats, beatDur);
     }
+    // Las notas del alumno suenan siempre: son lo que se está editando.
+    this.scheduleMelody(melodyNotes, startTime, countInBeats, beatDur);
 
     this.playing = true;
 

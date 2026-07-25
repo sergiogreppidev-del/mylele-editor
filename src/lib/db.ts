@@ -9,7 +9,11 @@ export interface ChordRow {
   name_es: string;
   frets: number[];
   fingers: number[];
+  /** Notas del acorde. Es lo que usa el motor de audio para detectarlo. */
   pitch_classes: number[];
+  /** Un peso por pitch class, en la misma posición. */
+  weights: number[];
+  sort_order: number;
 }
 
 export interface ChartRow {
@@ -45,9 +49,46 @@ export const EMPTY_SONG: Song = {
 /* ---------------- Acordes ---------------- */
 
 export async function listChords(): Promise<ChordRow[]> {
-  const { data, error } = await supabase.from('chords').select('*').order('id');
+  const { data, error } = await supabase
+    .from('chords')
+    .select('*')
+    .order('sort_order', { ascending: true })
+    .order('id', { ascending: true });
   if (error) throw error;
-  return (data ?? []) as ChordRow[];
+  return (data ?? []).map((c) => ({
+    ...(c as ChordRow),
+    weights: ((c as ChordRow).weights ?? []).map(Number),
+  }));
+}
+
+export async function upsertChord(row: ChordRow): Promise<void> {
+  const { error } = await supabase.from('chords').upsert({
+    id: row.id.trim(),
+    name_es: row.name_es.trim(),
+    frets: row.frets,
+    fingers: row.fingers,
+    pitch_classes: row.pitch_classes,
+    weights: row.weights,
+    sort_order: row.sort_order,
+  });
+  if (error) throw error;
+}
+
+export async function deleteChord(id: string): Promise<void> {
+  const { error } = await supabase.from('chords').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/** En qué niveles se usa un acorde. Borrarlo sin mirar esto rompe esos niveles. */
+export function chordUsage(songs: SongRow[], chordId: string): string[] {
+  const out: string[] = [];
+  for (const s of songs) {
+    const usa = s.charts.some(
+      (c) => c.mode !== BACKING_MODE && c.events.some((e) => 'chord' in e && e.chord === chordId),
+    );
+    if (usa) out.push(s.title);
+  }
+  return out;
 }
 
 /* ---------------- Canciones ---------------- */
