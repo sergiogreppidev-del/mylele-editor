@@ -301,14 +301,25 @@ console.log('\n=== El sub-nivel cambia la densidad de acordes ===');
   check('sin especificar, es el sub-nivel fácil', P.buildAiPrompt(base) === facil);
 
   check('fácil: exige uno por compás', /UN SOLO acorde por comp[aá]s/.test(facil));
-  check('fácil: prohíbe partir el compás', /PROHIBIDO cambiar de acorde dentro de un comp/.test(facil));
+  check('fácil: prohíbe partir el compás', /prohibido partir un comp[aá]s en dos acordes/i.test(facil));
+  check('fácil: pide que el acorde dure dos compases', /DOS COMPASES O M[AÁ]S/.test(facil));
+  check('fácil: le da una salida honesta si la canción no entra', /NOTA:/.test(facil));
   check('fácil: el ejemplo no parte ningún compás', /\| C\/4 \| C\/4 \| F\/4 \| G\/4 \|/.test(facil));
   check('fácil: no habla de dos por compás', !/DOS acordes por comp/.test(facil));
 
-  check('difícil: permite hasta dos', /m[aá]ximo DOS acordes por comp[aá]s/.test(dificil));
+  check('difícil: permite partir el compás en dos', /partir un comp[aá]s en DOS acordes/.test(dificil));
+  check('difícil: no exige dos compases por acorde', !/DOS COMPASES O M[AÁ]S/.test(dificil));
   check('difícil: prohíbe tres o más', /Nunca tres o m[aá]s/.test(dificil));
   check('difícil: el ejemplo parte un compás', /\| C\/4 \| Am\/4 \| F\/2 C\/2 \| G\/4 \|/.test(dificil));
   check('difícil: los dos de un compás partido van distintos', /tienen que ser DISTINTOS/.test(dificil));
+
+  // Los acordes permitidos: el pedido tiene que nombrarlos, y solo esos.
+  const soloFaciles = P.buildAiPrompt({ ...base, dificultad: 'facil', acordesPermitidos: ['Am', 'C', 'F'] });
+  check('el pedido nombra los acordes permitidos', /Usá SOLO estos acordes: Am, C, F/.test(soloFaciles));
+  check('y no ofrece el G en ningún lado de la regla',
+    !/Am, C, F, G/.test(soloFaciles.split('MANO IZQUIERDA')[1] ?? ''));
+  check('sin lista explícita, cae al catálogo entero tal como viene',
+    /Usá SOLO estos acordes: C, Am, F, G/.test(P.buildAiPrompt({ ...base, dificultad: 'facil' })));
 
   // Nivel completo: el límite tiene que aplicar SOLO al renglón de acordes.
   const nivel = { target: 'nivel', title: 'T', bpm: 80, timeSig: '4/4', beatsPerBar: 4, bars: 8,
@@ -316,7 +327,7 @@ console.log('\n=== El sub-nivel cambia la densidad de acordes ===');
   const nivelF = P.buildAiPrompt({ ...nivel, dificultad: 'facil' });
   const nivelD = P.buildAiPrompt({ ...nivel, dificultad: 'dificil' });
   check('nivel · fácil: uno por compás', /UN SOLO acorde por comp[aá]s/.test(nivelF));
-  check('nivel · difícil: hasta dos', /m[aá]ximo DOS acordes por comp[aá]s/.test(nivelD));
+  check('nivel · difícil: permite partir el compás', /partir un comp[aá]s en DOS acordes/.test(nivelD));
   check('nivel · el límite es solo de ACORDES', /SOLO el rengl[oó]n ACORDES/.test(nivelF));
   check('nivel · la música sigue sin límite en los dos',
     /ninguna limitaci[oó]n de dificultad/.test(nivelF) && /ninguna limitaci[oó]n de dificultad/.test(nivelD));

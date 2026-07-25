@@ -4,10 +4,14 @@ import { deleteSong, duplicateSong, hasSongDraft, playableChart, songDifficulty,
 import type { SongRow } from '../lib/db';
 import { DIFICULTADES, ETAPA_ACTUAL } from '../lib/chartFormat';
 import type { ChartMode } from '../lib/chartFormat';
+import { medirAcordes, medirMelodia } from '../lib/dificultad';
+import type { Digitaciones } from '../lib/dificultad';
 import { friendlyError } from '../lib/supabase';
 
 interface Props {
   songs: SongRow[];
+  /** Digitaciones, para poder medir la dificultad de cada fila. */
+  digitaciones: Digitaciones;
   canEdit: boolean;
   /** Al crear, el tipo va decidido desde acá: es por dónde se entra. */
   onOpen: (songId: string | null, nuevoModo?: ChartMode) => void;
@@ -46,13 +50,31 @@ const GRUPOS: { mode: ChartMode; titulo: string; crear: string; vacio: string }[
   },
 ];
 
+/**
+ * La dificultad de un vistazo. Existe porque los tres niveles de acordes que
+ * había publicados daban todos lo mismo —4 acordes, ~18 cambios por minuto— y
+ * desde el listado no había forma de notarlo.
+ */
+function resumenDificultad(song: SongRow, chart: ReturnType<typeof playableChart>, dig: Digitaciones): string {
+  if (!chart || chart.events.length === 0) return 'sin eventos';
+  if (chart.mode === 'melody') {
+    const m = medirMelodia(chart.events.filter((e) => 'string' in e) as never, song.bpm);
+    return `${m.posiciones} posiciones · traste máx ${m.trasteMax} · ${m.notasPorMinuto} notas/min`;
+  }
+  const m = medirAcordes(
+    chart.events.filter((e) => 'chord' in e) as never,
+    dig, song.bpm, song.time_sig,
+  );
+  return `${m.distintos.length} acordes (${m.distintos.join(' ')}) · ${m.cambiosPorMinuto} cambios/min · ${m.dedosPorCambio} dedos`;
+}
+
 const STATE_LABEL: Record<State, { text: string; cls: string }> = {
   live: { text: '● En vivo', cls: 'badge live' },
   draft: { text: '✎ Borrador', cls: 'badge draft' },
   changed: { text: '✎ Cambios sin publicar', cls: 'badge draft' },
 };
 
-export function LevelList({ songs, canEdit, onOpen, onReload }: Props) {
+export function LevelList({ songs, digitaciones, canEdit, onOpen, onReload }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,7 +148,7 @@ export function LevelList({ songs, canEdit, onOpen, onReload }: Props) {
                     <th>Nivel</th>
                     <th>Sub-nivel</th>
                     <th>BPM</th>
-                    <th>Eventos</th>
+                    <th>Dificultad medida</th>
                     <th>Acceso</th>
                     <th>Estado</th>
                     <th />
@@ -149,7 +171,7 @@ export function LevelList({ songs, canEdit, onOpen, onReload }: Props) {
                           <span className="badge sub">{DIFICULTADES.find((d) => d.id === dif)?.label}</span>
                         </td>
                         <td className="tnum">{s.bpm}</td>
-                        <td className="tnum">{chart ? chart.events.length : 0}</td>
+                        <td className="muted">{resumenDificultad(s, chart, digitaciones)}</td>
                         <td>{s.is_free ? 'Gratis' : 'Premium'}</td>
                         <td>
                           <span className={label.cls}>{label.text}</span>

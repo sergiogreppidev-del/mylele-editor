@@ -95,6 +95,7 @@ export default function App() {
         ) : route.name === 'list' ? (
           <LevelList
             songs={songs}
+            digitaciones={Object.fromEntries(chords.map((c) => [c.id, c.frets]))}
             canEdit={isAdmin}
             onOpen={(songId, nuevoModo) => setRoute({ name: 'editor', songId, nuevoModo })}
             onReload={reload}

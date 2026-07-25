@@ -21,9 +21,17 @@ interface PromptOptions {
   bars: number;
   knownChords: string[];
   /**
-   * Sub-nivel que se está creando. Cambia UNA sola cosa: cuántos acordes por
-   * compás toca el alumno. La música de fondo no se toca — es la misma canción
-   * en los dos, y simplificarla "para que combine" es justamente el error.
+   * Los acordes que este sub-nivel permite: los N que menos dedos piden, calculados
+   * de las digitaciones reales. Es distinto de `knownChords`, que sigue siendo TODO
+   * el catálogo — si la IA se sale de la lista igual hay que poder leer la respuesta
+   * y avisar, en vez de rechazarla como si el acorde no existiera.
+   */
+  acordesPermitidos?: string[];
+  /**
+   * Sub-nivel que se está creando. Cambia lo que se le pide a la MANO IZQUIERDA:
+   * cuántas formas distintas, cuáles, y cada cuánto pueden cambiar. La música de
+   * fondo no se toca — es la misma canción en los dos, y simplificarla "para que
+   * combine" es justamente el error.
    */
   dificultad?: Difficulty;
   /**
@@ -77,36 +85,48 @@ const RITMO_COMPASES = [
 ];
 
 /**
- * La densidad de acordes es lo ÚNICO que separa a un sub-nivel del otro, así que
- * las reglas se escriben enteras para cada uno en vez de matizar un texto común:
- * un "salvo que sea el sub-nivel fácil" al final de una regla se lo saltean.
+ * Qué le pide cada sub-nivel a la mano izquierda.
+ *
+ * La regla anterior era "cuántos acordes por compás", y no separaba nada: se
+ * midieron los tres niveles publicados y los tres daban ~18 cambios por minuto
+ * con los mismos 4 acordes. En canciones de principiante la armonía cambia una
+ * vez por compás sola, así que el límite nunca apretaba.
+ *
+ * Lo que sí distingue es CUÁNTAS formas hay que saber, CUÁLES, y CADA CUÁNTO
+ * hay que cambiarlas. `permitidos` viene calculado de las digitaciones reales —
+ * los N acordes que menos dedos piden— y no de una lista escrita a mano, así que
+ * sigue teniendo sentido el día que se carguen acordes nuevos.
  */
-function reglasDensidad(dificultad: Difficulty): string[] {
+function reglasSubNivel(dificultad: Difficulty, permitidos: string[]): string[] {
+  const lista = permitidos.join(', ') || '(no hay acordes cargados)';
   if (dificultad === 'facil') {
     return [
-      'CUÁNTOS ACORDES POR COMPÁS — regla dura, no la negocies',
-      '- UN SOLO acorde por compás, ocupando el compás ENTERO: en 4/4 son todos "X/4"; en 3/4,',
-      '  todos "X/3". La duración del acorde es igual a los tiempos del compás, siempre.',
-      '- Está PROHIBIDO cambiar de acorde dentro de un compás. Nada de "F/2 C/2".',
-      '- Si la armonía real de la canción cambia en la mitad del compás, ignorá el segundo',
-      '  acorde y quedate con el que suena en el tiempo fuerte. Se pierde un matiz y está bien:',
-      '  el alumno recién está aprendiendo a cambiar de posición y necesita tiempo para llegar.',
-      '- Que un mismo acorde se repita varios compases seguidos NO es un problema, es lo esperado.',
-      '- Único caso aparte: si hay anacrusa, el primer compás es corto y lleva un solo acorde',
-      '  (o un silencio) que dure exactamente lo que ese compás corto.',
+      'QUÉ TAN DIFÍCIL PUEDE SER PARA LA MANO IZQUIERDA — regla dura, no la negocies',
+      `- Usá SOLO estos acordes: ${lista}. Son los que menos dedos piden. Ninguno más,`,
+      '  aunque la canción original los tenga: reemplazalos por el más parecido de esa lista.',
+      '- Apuntá a que cada acorde dure DOS COMPASES O MÁS. Cambiar antes se permite solo si',
+      '  sostenerlo sonaría claramente mal.',
+      '- UN SOLO acorde por compás, ocupando el compás entero: en 4/4 son todos "X/4"; en 3/4,',
+      '  todos "X/3". Está prohibido partir un compás en dos acordes.',
+      '- Si la armonía real cambia en la mitad del compás, quedate con el del tiempo fuerte.',
+      '  Se pierde un matiz y está bien: el alumno recién aprende a cambiar de posición.',
+      '- Que un mismo acorde se repita varios compases seguidos NO es un problema: es el objetivo.',
+      '- Si la canción que te pidieron necesita sí o sí más acordes o cambios más rápidos,',
+      '  DECILO en un renglón que empiece con "NOTA:" antes del BPM, y entregá igual la versión',
+      '  simplificada. No te salgas de la regla por tu cuenta.',
       '',
     ];
   }
   return [
-    'CUÁNTOS ACORDES POR COMPÁS — regla dura, no la negocies',
-    '- Como máximo DOS acordes por compás. Nunca tres o más.',
-    '- Cuando la armonía cambia en la mitad del compás, escribí los dos, cada uno de media',
-    '  duración: en 4/4 es "F/2 C/2". Ese es justo el ejercicio de este sub-nivel.',
-    '- Pero no metas un cambio de más solo para que sea difícil: si en ese compás la canción',
-    '  tiene un solo acorde, va uno solo, ocupando el compás entero.',
+    'QUÉ TAN DIFÍCIL PUEDE SER PARA LA MANO IZQUIERDA — regla dura, no la negocies',
+    `- Usá únicamente estos acordes: ${lista}. Si la canción pide otro, poné el más parecido.`,
+    '- Un acorde por compás es lo normal. Podés partir un compás en DOS acordes de media',
+    '  duración —en 4/4 es "F/2 C/2"— pero solo donde la armonía realmente cambia ahí.',
+    '- Nunca tres o más acordes en un mismo compás.',
     '- Los dos acordes de un compás partido tienen que ser DISTINTOS. "C/2 C/2" es un error:',
-    '  eso es un solo acorde de compás entero.',
-    '- Que un mismo acorde dure varios compases seguidos sigue estando bien.',
+    '  eso es un solo acorde de compás entero y hay que escribirlo así.',
+    '- No metas un cambio de más solo para que sea difícil: si el compás tiene un solo acorde,',
+    '  va uno solo. Un acorde que dura varios compases seguidos sigue estando bien.',
     '',
   ];
 }
@@ -116,6 +136,7 @@ export function buildAiPrompt(o: PromptOptions): string {
 
   const pedido = o.pedido?.trim();
   const dif: Difficulty = o.dificultad ?? 'facil';
+  const permitidos = o.acordesPermitidos?.length ? o.acordesPermitidos : o.knownChords;
   const partes: string[] = [
     'Sos un asistente que escribe partituras para MyLele, una app para aprender ukelele.',
     '',
@@ -168,9 +189,9 @@ export function buildAiPrompt(o: PromptOptions): string {
   if (o.target === 'chords') {
     partes.push(
       'REGLAS',
-      `- Usá ÚNICAMENTE estos acordes: ${o.knownChords.join(', ') || '(no hay acordes cargados)'}. No inventes otros.`,
-      '- Si la canción necesita un acorde que no está en esa lista, reemplazalo por el más parecido',
-      '  (por ejemplo G7 -> G, Dm -> Am) y seguí adelante.',
+      '- Qué acordes podés usar y cada cuánto pueden cambiar está más abajo, en su propia sección.',
+      '- Si la canción necesita un acorde que no está permitido, reemplazalo por el más parecido',
+      '  de los que sí (por ejemplo G7 -> G, Dm -> Am) y seguí adelante.',
       '- Antes de escribir, pensá la melodía y fijate qué notas caen en cada compás: el acorde',
       '  sale de ahí, no de la memoria.',
       '- No estires ni repitas nada para llegar a una cantidad redonda de compases: la canción dura',
@@ -178,7 +199,7 @@ export function buildAiPrompt(o: PromptOptions): string {
       '- Podés agregar :d (rasgueo hacia abajo) o :u (hacia arriba) después de la duración.',
       '  Si no ponés nada, es hacia abajo.',
       '',
-      ...reglasDensidad(dif),
+      ...reglasSubNivel(dif, permitidos),
     );
 
     // Si el nivel ya tiene la melodía cargada, se la damos: armonizar ESTA melodía
@@ -315,7 +336,7 @@ export const TARGET_LABEL: Record<ImportTarget, string> = {
  */
 function promptNivelCompleto(o: PromptOptions): string {
   const pedido = o.pedido?.trim();
-  const acordes = o.knownChords.join(', ') || '(no hay acordes cargados)';
+  const permitidos = o.acordesPermitidos?.length ? o.acordesPermitidos : o.knownChords;
   const dif: Difficulty = o.dificultad ?? 'facil';
   const tocaAcordes = (o.modo ?? 'chords') === 'chords';
 
@@ -381,8 +402,8 @@ function promptNivelCompleto(o: PromptOptions): string {
     '  capas la comparten.',
     ...(tocaAcordes
       ? [
-          `- ACORDES: usá únicamente estos: ${acordes}. Si la canción pide otro, poné el más parecido`,
-          '  (G7 -> G, Dm -> Am). Cuántos entran por compás está en la sección siguiente.',
+          '- ACORDES: cuáles podés usar y cada cuánto pueden cambiar está más abajo, en su propia',
+          '  sección. Si la canción pide uno que no está permitido, poné el más parecido de los que sí.',
           '- MELODIA: notas entre C4 y A5 (el rango del ukelele), una sola por vez.',
         ]
       : [
@@ -397,7 +418,7 @@ function promptNivelCompleto(o: PromptOptions): string {
     ...(tocaAcordes
       ? [
           '',
-          ...reglasDensidad(dif),
+          ...reglasSubNivel(dif, permitidos),
           'Repito porque es el error más común: esto limita SOLO el renglón ACORDES.',
         ]
       : [

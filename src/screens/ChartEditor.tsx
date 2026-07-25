@@ -12,6 +12,9 @@ import type { ChordPcs } from '../lib/previewAudio';
 import { BackingLane } from '../components/BackingLane';
 import { LevelOverview, largoDeCapas } from '../components/LevelOverview';
 import { ImportDialog } from '../components/ImportDialog';
+import { DificultadPanel } from '../components/DificultadPanel';
+import { acordesPara, medirAcordes, medirMelodia, verificarPerfil } from '../lib/dificultad';
+import type { Digitaciones } from '../lib/dificultad';
 import { STRING_MIDI, midiToPitch, validateBacking } from '../lib/notation';
 import type { ImportTarget } from '../lib/aiPrompt';
 import {
@@ -158,6 +161,36 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     [playable, backingNotes, song.time_sig, minBars, song.pickup_beats],
   );
 
+  /** Las digitaciones, que son con lo que se mide qué tan difícil es el nivel. */
+  const digitaciones: Digitaciones = useMemo(() => {
+    const map: Digitaciones = {};
+    chords.forEach((c) => (map[c.id] = c.frets));
+    return map;
+  }, [chords]);
+
+  /** Los acordes que este sub-nivel deja usar: los que menos dedos piden. */
+  const acordesPermitidos = useMemo(
+    () => acordesPara(dificultad, digitaciones),
+    [dificultad, digitaciones],
+  );
+
+  /**
+   * La dificultad, medida. Los tres niveles publicados daban todos ~18 cambios por
+   * minuto con los mismos 4 acordes y no había forma de notarlo sin tocarlos.
+   */
+  const metricas = useMemo(
+    () =>
+      mode === 'melody'
+        ? medirMelodia(melody, song.bpm)
+        : medirAcordes(events, digitaciones, song.bpm, song.time_sig),
+    [mode, melody, events, digitaciones, song.bpm, song.time_sig],
+  );
+
+  const perfilIssues = useMemo(
+    () => (metricas.tipo === 'chords' ? verificarPerfil(metricas, dificultad, digitaciones) : []),
+    [metricas, dificultad, digitaciones],
+  );
+
   const chordPcs: ChordPcs = useMemo(() => {
     const map: ChordPcs = {};
     chords.forEach((c) => (map[c.id] = c.pitch_classes));
@@ -170,7 +203,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     [playable, mode, chords, song.time_sig],
   );
   const backingIssues = useMemo(() => validateBacking(backingNotes), [backingNotes]);
-  const allIssues = [...songIssues, ...chartIssues, ...backingIssues];
+  const allIssues = [...songIssues, ...chartIssues, ...backingIssues, ...perfilIssues];
   const blocked = hasErrors(allIssues);
 
   const liveChart: ChartRow | null = loaded ? publishedChart(loaded, mode, dificultad) : null;
@@ -706,6 +739,21 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
             </span>
           </div>
 
+          {/* La dificultad medida, al lado del sub-nivel que la define. */}
+          {(playable.length > 0) && (
+            <div className="card">
+              <div className="section-title" style={{ marginBottom: 10 }}>
+                Qué tan difícil es este nivel
+              </div>
+              <DificultadPanel metricas={metricas} dificultad={dificultad} />
+              {perfilIssues.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <Issues issues={perfilIssues} />
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ---------- paleta ---------- */}
           <div className="card">
             <div className="row" style={{ marginBottom: 10 }}>
@@ -739,7 +787,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
                 </p>
               </>
             ) : (
-              <ChordPalette chords={chords} selected={brush} onSelect={setBrush} />
+              <ChordPalette chords={chords} selected={brush} permitidos={acordesPermitidos} onSelect={setBrush} />
             )}
           </div>
 
@@ -1160,6 +1208,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
           beatsPerBar={bpb}
           bars={bars}
           knownChords={chords.map((c) => c.id)}
+          acordesPermitidos={acordesPermitidos}
           modo={mode}
           dificultad={dificultad}
           onDificultad={cambiarDificultad}

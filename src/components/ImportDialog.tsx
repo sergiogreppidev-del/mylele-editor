@@ -6,6 +6,7 @@ import type { ImportTarget } from '../lib/aiPrompt';
 import { parseNotation, toNotation } from '../lib/notation';
 import type { SuggestedSetup } from '../lib/notation';
 import { DIFICULTADES, ETAPA_ACTUAL, parseBacking, parseEvents, tidy } from '../lib/chartFormat';
+import { PERFILES } from '../lib/dificultad';
 import type { BackingEvent, ChartMode, ChordEvent, Difficulty, Issue, MelodyEvent } from '../lib/chartFormat';
 import { friendlyError, generarConGemini } from '../lib/supabase';
 
@@ -17,6 +18,8 @@ interface Props {
   beatsPerBar: number;
   bars: number;
   knownChords: string[];
+  /** Los que este sub-nivel permite. `knownChords` sigue siendo todo el catálogo. */
+  acordesPermitidos: string[];
   /** Qué toca el alumno en este nivel. Lo eligió el autor y manda sobre lo que devuelva la IA. */
   modo: ChartMode;
   /** Sub-nivel que se está creando. Se elige ACÁ, antes de pedirle nada a la IA. */
@@ -66,7 +69,6 @@ export function ImportDialog(props: Props) {
    * dos, así que el selector tiene que estar a la vista: si no, se elige solo.
    * El fondo no lleva sub-nivel: siempre se guarda en el mismo.
    */
-  /** En un nivel de notas el sub-nivel todavía no cambia el pedido, solo dónde se guarda. */
   const afectaAlPedido = target === 'chords' || (esNivelCompleto && props.modo === 'chords');
   const eligeDificultad = afectaAlPedido || target === 'melody' || esNivelCompleto;
   const difActual = DIFICULTADES.find((d) => d.id === props.dificultad);
@@ -159,6 +161,7 @@ export function ImportDialog(props: Props) {
       target, title: props.title, bpm: props.bpm, timeSig: props.timeSig,
       beatsPerBar, bars, knownChords, pedido, imponerMedida, melodiaDelNivel,
       dificultad: props.dificultad, modo: props.modo,
+      acordesPermitidos: props.acordesPermitidos,
     });
   }
 
@@ -241,9 +244,15 @@ export function ImportDialog(props: Props) {
               <p className="muted" style={{ margin: '6px 0 0' }}>
                 {afectaAlPedido ? (
                   <>
-                    Etapa <b>{ETAPA_ACTUAL}</b> · {knownChords.length} acordes ({knownChords.join(', ')}).
-                    Los dos sub-niveles usan los mismos acordes: lo único que cambia es cuántos entran
-                    por compás. <b>La música de fondo es idéntica en los dos.</b>
+                    Etapa <b>{ETAPA_ACTUAL}</b>. En este sub-nivel la IA puede usar{' '}
+                    <b>{props.acordesPermitidos.join(', ') || '—'}</b>
+                    {props.acordesPermitidos.length < knownChords.length && (
+                      <> (de {knownChords.length} cargados: son los que menos dedos piden)</>
+                    )}
+                    , y los acordes tienen que durar al menos{' '}
+                    <b>{PERFILES[props.dificultad].minCompasesPorAcorde}</b>{' '}
+                    {PERFILES[props.dificultad].minCompasesPorAcorde === 1 ? 'compás' : 'compases'}.{' '}
+                    <b>La música de fondo es idéntica en los dos sub-niveles.</b>
                   </>
                 ) : (
                   <>

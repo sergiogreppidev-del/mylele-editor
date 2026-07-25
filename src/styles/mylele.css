@@ -179,6 +179,9 @@ input.f[type='checkbox'] { width: 22px; height: 22px; accent-color: var(--grape)
   text-shadow: none; opacity: .95; }
 .chip:active { transform: translateY(4px); box-shadow: 0 1px 0 rgba(58,42,99,.3); }
 .chip.sel { outline: 4px solid var(--ink); outline-offset: 3px; }
+/* Fuera del sub-nivel: se ve, se puede usar, pero no invita. */
+.chip.fuera { filter: grayscale(.75); opacity: .6; }
+.chip.fuera.sel { filter: none; opacity: 1; }
 
 /* ---- Barra de pasos del editor ----
    Nombre propio (wstep): el diálogo de importar ya usa .step para sus secciones. */
@@ -202,6 +205,21 @@ input.f[type='checkbox'] { width: 22px; height: 22px; accent-color: var(--grape)
 .wstep.bad { border-color: var(--melon); }
 .wstep.bad .wstep-n { background: var(--melon); color: #fff; }
 @media (max-width: 560px) { .wstep-l { display: none; } .wstep { flex: 0 0 auto; } }
+
+/* ---- Métricas de dificultad ---- */
+.metricas { display: flex; flex-wrap: wrap; gap: 10px; }
+.metrica {
+  flex: 1 1 130px; display: flex; flex-direction: column; gap: 1px;
+  background: var(--cream); border: 2.5px solid var(--ink); border-radius: 14px;
+  padding: 8px 12px;
+}
+.metrica .v { font-family: 'Titan One', cursive; font-weight: 400; font-size: 22px; line-height: 1.1; }
+.metrica .v small { font-family: 'Baloo 2', sans-serif; font-size: 12px; font-weight: 700; margin-left: 3px; }
+.metrica .q { font-size: 11.5px; font-weight: 700; color: var(--ink-2); line-height: 1.25; }
+.metrica .t { font-size: 10.5px; font-weight: 800; color: var(--ink-2); opacity: .75;
+  text-transform: uppercase; letter-spacing: .4px; }
+.metrica.pasado { background: #FFE3E9; border-color: var(--melon-d); }
+.metrica.pasado .v, .metrica.pasado .t { color: var(--melon-d); }
 
 /* ---- Resumen plegado de la ficha ---- */
 .resumen {
