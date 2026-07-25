@@ -19,6 +19,11 @@ interface PromptOptions {
   /** Qué canción o idea quiere el autor. Puede ir vacío. */
   pedido?: string;
   /**
+   * La melodía que ya tiene el nivel, en notación. Cuando existe se la mandamos
+   * para que arme los acordes SOBRE ESA melodía en vez de sobre la que recuerde.
+   */
+  melodiaDelNivel?: string;
+  /**
    * true  = el autor impone compás, tempo y extensión (ejercicio a medida).
    * false = los decide la IA según la canción (lo normal).
    */
@@ -90,13 +95,37 @@ export function buildAiPrompt(o: PromptOptions): string {
     partes.push(
       'REGLAS',
       `- Usá ÚNICAMENTE estos acordes: ${o.knownChords.join(', ') || '(no hay acordes cargados)'}. No inventes otros.`,
-      '- Si la canción original necesita un acorde que no está en esa lista, reemplazalo por el',
-      '  más parecido de la lista y seguí adelante.',
+      '- Si la canción necesita un acorde que no está en esa lista, reemplazalo por el más parecido',
+      '  (por ejemplo G7 -> G, Dm -> Am) y seguí adelante.',
+      '',
+      '- LO MÁS IMPORTANTE: poné cada acorde donde REALMENTE cambia en la canción, y hacelo durar',
+      '  lo que dura ahí. Muchas canciones cambian de acorde en la mitad del compás: eso se escribe',
+      '  con dos acordes de media duración, por ejemplo "F/2 C/2" en un compás de 4/4.',
+      '- NO pongas un acorde por compás por comodidad. Si la armonía cambia dos veces en un compás,',
+      '  escribí los dos; si un acorde dura tres compases, escribilo como uno solo largo.',
+      '- No estires ni repitas nada para llegar a una cantidad redonda de compases: la canción dura',
+      '  lo que dura. Twinkle Twinkle, por ejemplo, son 12 compases de 4/4, no 16.',
+      '- Antes de escribir, pensá la melodía y fijate en qué sílaba cae cada cambio de acorde.',
+      '',
       '- Podés agregar :d (rasgueo hacia abajo) o :u (hacia arriba) después de la duración.',
       '  Si no ponés nada, es hacia abajo.',
-      '- Para alguien que recién empieza, un acorde por compás ya está bien.',
       '',
     );
+
+    // Si el nivel ya tiene la melodía cargada, se la damos: armonizar ESTA melodía
+    // es mucho más confiable que confiar en cómo se acuerde la canción.
+    if (o.melodiaDelNivel) {
+      partes.push(
+        'LA MELODÍA DE ESTE NIVEL (armonizá exactamente esta, no otra versión)',
+        'Está en la misma notación: nota+octava/duración, y "|" separa compases.',
+        '',
+        o.melodiaDelNivel,
+        '',
+        '- Los acordes tienen que sumar la MISMA cantidad de tiempos que esta melodía.',
+        '- Cada acorde tiene que contener las notas que suenan mientras dura.',
+        '',
+      );
+    }
   } else if (o.target === 'melody') {
     partes.push(
       'REGLAS',
@@ -123,9 +152,9 @@ export function buildAiPrompt(o: PromptOptions): string {
   const bpb = o.imponerMedida ? o.beatsPerBar : 4;
   if (o.target === 'chords') {
     partes.push(
-      'EJEMPLO',
+      'EJEMPLO (fijate que el tercer compás cambia de acorde en la mitad)',
       ...(o.imponerMedida ? [] : ['BPM: 92', 'COMPAS: 4/4']),
-      `| C/${bpb} | Am/${bpb} | F/${bpb} | G/${bpb} |`,
+      `| C/${bpb} | Am/${bpb} | F/${bpb / 2} C/${bpb / 2} | G/${bpb} |`,
     );
   } else {
     partes.push(

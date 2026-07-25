@@ -96,6 +96,45 @@ const rtol = N.parseNotation('Tempo = 96\ncompás: 6/8\n| C/6 |', { target: 'cho
 check('tolera "Tempo =" y "compás:" en minúscula', rtol.suggested.bpm === 96 && rtol.suggested.timeSig === '6/8',
   JSON.stringify(rtol.suggested));
 
+console.log('\n=== Acordes que cambian DENTRO del compás ===');
+// Twinkle Twinkle de verdad: 12 compases y cambios a mitad de compás. Lo que la IA
+// devolvía antes (16 compases de un acorde cada uno) no se parecía a la canción.
+const twinkle = [
+  'BPM: 100', 'COMPAS: 4/4',
+  '| C/4 | F/2 C/2 | F/2 C/2 | G/2 C/2 |',
+  '| C/2 G/2 | C/2 G/2 | C/2 G/2 | C/2 G/2 |',
+  '| C/4 | F/2 C/2 | F/2 C/2 | G/2 C/2 |',
+].join('\n');
+const rt = N.parseNotation(twinkle, { target: 'chords', beatsPerBar: 4, knownChords: ['C', 'F', 'G', 'Am'] });
+const errT = rt.issues.filter((i) => i.level === 'error');
+check('sin errores', errT.length === 0, JSON.stringify(errT.map((i) => i.message)));
+const avisosT = rt.issues.filter((i) => /debería sumar/.test(i.message));
+check('los 12 compases suman bien', avisosT.length === 0, JSON.stringify(avisosT.map((i) => i.message)));
+check('22 acordes (7 + 8 + 7)', rt.chordEvents.length === 22, String(rt.chordEvents.length));
+check('dura 48 tiempos = 12 compases', rt.totalBeats === 48, String(rt.totalBeats));
+check('el 2do acorde entra en el beat 4', rt.chordEvents[1].t === 4 && rt.chordEvents[1].chord === 'F');
+check('el cambio de mitad de compás cae en el beat 6',
+  rt.chordEvents[2].t === 6 && rt.chordEvents[2].chord === 'C', JSON.stringify(rt.chordEvents[2]));
+
+console.log('\n=== El pedido que se le manda a la IA ===');
+const P = require('./build/aiPrompt.js');
+const base = { target: 'chords', title: 'T', bpm: 80, timeSig: '4/4', beatsPerBar: 4, bars: 8,
+               knownChords: ['C', 'Am', 'F', 'G'], pedido: 'Twinkle Twinkle', imponerMedida: false };
+const p1 = P.buildAiPrompt(base);
+check('NO le dice "un acorde por compás"', !/un acorde por comp[aá]s ya est[aá] bien/i.test(p1));
+check('le pide el ritmo armónico real', /cambian de acorde en la mitad del comp/i.test(p1));
+check('le prohíbe estirar para redondear', /no estires ni repitas/i.test(p1));
+check('le pide que declare BPM y compás', /BPM: <n/.test(p1) && /COMPAS: </.test(p1));
+check('el ejemplo muestra un cambio a mitad de compás', /F\/2 C\/2/.test(p1));
+
+const p2 = P.buildAiPrompt({ ...base, melodiaDelNivel: 'C4/1 C4/1 G4/1 G4/1 | A4/1 A4/1 G4/2' });
+check('incluye la melodía del nivel cuando la hay', /armoniz[aá] exactamente esta/i.test(p2) && /C4\/1 C4\/1 G4\/1/.test(p2));
+check('sin melodía no la menciona', !/armoniz[aá] exactamente esta/i.test(p1));
+
+const p3 = P.buildAiPrompt({ ...base, imponerMedida: true });
+check('con medida impuesta sí fija los compases', /Extensi[oó]n: 8 compases/.test(p3));
+check('con medida impuesta no pide la cabecera', !/BPM: <n/.test(p3));
+
 console.log('\n=== Ida y vuelta (exportar y volver a leer) ===');
 const texto = N.toNotation(r5.chordEvents, 4);
 console.log('        exportado:', texto);

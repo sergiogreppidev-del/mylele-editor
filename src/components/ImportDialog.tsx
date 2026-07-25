@@ -107,10 +107,18 @@ export function ImportDialog(props: Props) {
     return { chords: bump(parsed.chords), melody: bump(parsed.melody), backing: bump(parsed.backing) };
   }, [parsed, offset]);
 
+  /** La melodía que ya tiene el nivel: primero la jugable, si no el fondo. */
+  const melodiaDelNivel = useMemo(() => {
+    if (target !== 'chords') return undefined;
+    const fuente = props.currentMelody.length ? props.currentMelody : props.currentBacking;
+    if (!fuente.length) return undefined;
+    return toNotation(fuente as never, beatsPerBar);
+  }, [target, props.currentMelody, props.currentBacking, beatsPerBar]);
+
   async function copyPrompt() {
     const prompt = buildAiPrompt({
       target, title: props.title, bpm: props.bpm, timeSig: props.timeSig,
-      beatsPerBar, bars, knownChords, pedido, imponerMedida,
+      beatsPerBar, bars, knownChords, pedido, imponerMedida, melodiaDelNivel,
     });
     try {
       await navigator.clipboard.writeText(prompt);
@@ -162,6 +170,12 @@ export function ImportDialog(props: Props) {
               Obligarla a usar <b>{props.timeSig} a {props.bpm} BPM</b> en <b>{bars} compases</b>
             </span>
           </label>
+          {melodiaDelNivel && (
+            <div className="notice good" style={{ marginTop: 8 }}>
+              🎵 Este nivel ya tiene la melodía cargada, así que va incluida en el pedido: la IA va a
+              armonizar <b>esa</b> melodía, no la que recuerde de la canción. Sale bastante mejor.
+            </div>
+          )}
           <p className="muted" style={{ margin: '6px 0 0' }}>
             {imponerMedida ? (
               <>

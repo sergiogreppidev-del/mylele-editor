@@ -79,6 +79,16 @@ Las dos se pueden importar con el botón **✨ Importar con IA**. El ciclo es:
 > editor te ofrece aplicarlos al nivel con un clic. Solo si estás armando un ejercicio propio
 > conviene tildar *"obligarla a usar…"* e imponerle vos la medida.
 
+### Para que los acordes salgan bien
+
+Los acordes son lo que peor le sale a una IA, porque no alcanza con saberse la canción: hay que
+poner cada cambio **donde realmente ocurre**, y en muchas canciones la armonía cambia en la mitad
+del compás. Un acorde por compás suena mal contra la melodía.
+
+**Conviene importar primero la melodía y después los acordes.** Cuando el nivel ya tiene notas
+cargadas, el editor se las manda en el pedido y la IA armoniza *esa* melodía en vez de la que
+recuerde. Sale bastante mejor, y el diálogo te avisa cuando lo está haciendo.
+
 ### La notación
 
 Puede empezar con la medida que propone quien la escribió (opcional):
