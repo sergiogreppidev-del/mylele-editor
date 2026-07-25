@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CandyButton } from '../components/CandyButton';
-import { deleteSong, duplicateSong, publishedChart, songMode, workingChart } from '../lib/db';
+import { deleteSong, duplicateSong, hasSongDraft, publishedChart, songMode, workingChart } from '../lib/db';
 import type { SongRow } from '../lib/db';
 import { friendlyError } from '../lib/supabase';
 
@@ -18,6 +18,8 @@ function stateOf(song: SongRow): State {
   const live = publishedChart(song, mode);
   const work = workingChart(song, mode);
   if (!live) return 'draft';
+  // Cuenta como "sin publicar" tanto un chart nuevo como cambios en la ficha.
+  if (hasSongDraft(song)) return 'changed';
   if (work && work.id !== live.id) return 'changed';
   return 'live';
 }

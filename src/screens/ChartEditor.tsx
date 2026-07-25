@@ -19,8 +19,9 @@ import type {
   BackingEvent, ChartEvent, ChartMode, ChordEvent, MelodyEvent, Song, StrumPattern,
 } from '../lib/chartFormat';
 import {
-  EMPTY_SONG, backingUrl, deleteBacking, discardDraft, getSong, insertSong, publishChart,
-  publishedChart, saveDraft, songMode, updateSong, uploadBacking, workingChart,
+  EMPTY_SONG, backingUrl, deleteBacking, discardDraft, discardSongDraft, effectiveSong,
+  getSong, hasSongDraft, insertSong, publishChart, publishSongMeta, publishedChart,
+  saveDraft, saveSongDraft, songMode, uploadBacking, workingChart,
 } from '../lib/db';
 import type { ChartRow, ChordRow, SongRow } from '../lib/db';
 import { friendlyError } from '../lib/supabase';
@@ -99,7 +100,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
         setLoaded(row);
         setId(row.id);
         setMode(m);
-        setSong({ ...row });
+        setSong(effectiveSong(row));   // lo publicado con el borrador de la ficha encima
         setEvents((work?.events ?? []).filter((e): e is ChordEvent => 'chord' in e));
         setMelody((work?.events ?? []).filter((e): e is MelodyEvent => 'string' in e));
         setBackingNotes(workingChart(row, BACKING_MODE)?.backing ?? []);
@@ -141,6 +142,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   const liveChart: ChartRow | null = loaded ? publishedChart(loaded, mode) : null;
   const workChart: ChartRow | null = loaded ? workingChart(loaded, mode) : null;
   const hasUnpublishedDraft = !!workChart && !workChart.published;
+  const fichaEnBorrador = !!loaded && hasSongDraft(loaded);
 
   function patch(next: Partial<Song>) {
     setSong((s) => ({ ...s, ...next }));
@@ -268,6 +270,14 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
     };
   }, [recordedUrl]);
 
+  /** Un archivo solo se puede borrar si no es el que están escuchando los alumnos. */
+  function esElPublicado(path: string | null): boolean {
+    return !!path && loaded?.audio_path === path;
+  }
+  async function borrarSiNoEstaEnVivo(path: string | null) {
+    if (path && !esElPublicado(path)) await deleteBacking(path).catch(() => {});
+  }
+
   async function handleUpload(file: File) {
     if (!canEdit) return;
     setUploading(true);
@@ -276,8 +286,9 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       const anterior = song.audio_path;
       const path = await uploadBacking(file, song.slug);
       patch({ audio_path: path });
-      // El archivo viejo se borra recién ahora: si la subida falla, no se pierde nada.
-      if (anterior) await deleteBacking(anterior).catch(() => {});
+      // El anterior se borra recién ahora (si la subida falla, no se pierde nada) y
+      // solo si no es el que está publicado: ese lo siguen usando los alumnos.
+      await borrarSiNoEstaEnVivo(anterior);
       setFlash('Audio subido. Dale a Reproducir y fijate si entra en el tiempo 1.');
     } catch (e) {
       setError(friendlyError(e));
@@ -291,7 +302,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
     if (!window.confirm('¿Sacar el acompañamiento grabado? El nivel vuelve al sintetizado.')) return;
     const path = song.audio_path;
     patch({ audio_path: null, audio_offset_s: 0 });
-    await deleteBacking(path).catch(() => {});
+    await borrarSiNoEstaEnVivo(path);
   }
 
   /* ---------- reproducción ---------- */
@@ -336,8 +347,11 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
     try {
       let sid = id;
       if (sid) {
-        await updateSong(sid, song);
+        // La ficha va a borrador: el alumno sigue viendo el título, el BPM y el
+        // audio que están publicados hasta que se apriete Publicar.
+        await saveSongDraft(sid, song);
       } else {
+        // Un nivel nuevo todavía no tiene chart publicado, así que no se ve en la app.
         const created = await insertSong(song);
         sid = created.id;
         setId(sid);
@@ -355,10 +369,33 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
         if (publish) await publishChart(bDraft.id);
       }
 
+      // La ficha se vuelca a las columnas vivas recién acá.
+      if (publish) await publishSongMeta(sid);
+
       const fresh = await getSong(sid);
       setLoaded(fresh);
       setDirty(false);
+      setSong(effectiveSong(fresh));
       setFlash(publish ? '🎉 Publicado: ya está en vivo para los alumnos.' : '💾 Borrador guardado (los alumnos todavía no lo ven).');
+      await onReload();
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDiscardFicha() {
+    if (!id) return;
+    if (!window.confirm('¿Descartar los cambios de la ficha y volver a lo publicado?')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await discardSongDraft(id);
+      const fresh = await getSong(id);
+      setLoaded(fresh);
+      setSong(effectiveSong(fresh));
+      setFlash('Cambios de la ficha descartados.');
       await onReload();
     } catch (e) {
       setError(friendlyError(e));
@@ -402,7 +439,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
         </CandyButton>
         <h2 style={{ fontSize: 22 }}>{id ? song.title || 'Nivel sin título' : 'Nivel nuevo'}</h2>
         {liveChart && <span className="badge live">● En vivo</span>}
-        {hasUnpublishedDraft && <span className="badge draft">✎ Borrador sin publicar</span>}
+        {(hasUnpublishedDraft || fichaEnBorrador) && <span className="badge draft">✎ Borrador sin publicar</span>}
         {dirty && <span className="badge">Cambios sin guardar</span>}
       </div>
 
@@ -416,9 +453,23 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
 
       {/* ---------- datos del nivel ---------- */}
       <div className="card">
-        <div className="section-title" style={{ marginBottom: 10 }}>
-          Datos del nivel
+        <div className="row" style={{ marginBottom: 10 }}>
+          <div className="section-title grow">Datos del nivel</div>
+          {fichaEnBorrador && (
+            <>
+              <span className="badge draft">✎ Sin publicar</span>
+              <CandyButton small tone="ghost" disabled={busy} onClick={() => void handleDiscardFicha()}>
+                Descartar cambios
+              </CandyButton>
+            </>
+          )}
         </div>
+        {fichaEnBorrador && (
+          <div className="notice warn" style={{ marginBottom: 12 }}>
+            Estos datos están guardados como borrador. Los alumnos siguen viendo{' '}
+            <b>{loaded?.title}</b> a <b>{loaded?.bpm} BPM</b> hasta que publiques.
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
           <label className="field">
             <span>Título</span>

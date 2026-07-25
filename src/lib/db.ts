@@ -31,6 +31,18 @@ export interface ChartRow {
 export interface SongRow extends Song {
   id: string;
   charts: ChartRow[];
+  /** Cambios de la ficha sin publicar. Las columnas de al lado son lo que ve el alumno. */
+  draft: Partial<Song> | null;
+}
+
+/** La ficha tal como se ve en el editor: lo publicado con el borrador encima. */
+export function effectiveSong(row: SongRow): Song {
+  return { ...stripSong(row), ...(row.draft ?? {}) } as Song;
+}
+
+/** ¿La ficha tiene cambios que el alumno todavía no ve? */
+export function hasSongDraft(row: SongRow): boolean {
+  return row.draft !== null && row.draft !== undefined;
 }
 
 export const EMPTY_SONG: Song = {
@@ -146,6 +158,7 @@ function normalizeSongRow(raw: unknown): SongRow {
     ...r,
     bpm: Number(r.bpm),
     audio_offset_s: Number(r.audio_offset_s) || 0,
+    draft: r.draft ?? null,
     charts: (r.charts ?? []).map((c) => ({
       ...c,
       // El mismo campo jsonb guarda dos formas distintas según el modo.
@@ -155,23 +168,54 @@ function normalizeSongRow(raw: unknown): SongRow {
   };
 }
 
+/** Un nivel nuevo todavía no tiene chart publicado, así que no se ve en la app:
+ *  se puede escribir directo en las columnas. El borrador arranca vacío. */
 export async function insertSong(song: Song): Promise<SongRow> {
-  const { data, error } = await supabase.from('songs').insert(stripSong(song)).select().single();
+  const { data, error } = await supabase
+    .from('songs')
+    .insert({ ...stripSong(song), draft: null })
+    .select()
+    .single();
   if (error) throw error;
   return { ...normalizeSongRow(data), charts: [] };
 }
 
-export async function updateSong(id: string, song: Song): Promise<void> {
-  const { error } = await supabase.from('songs').update(stripSong(song)).eq('id', id);
+/**
+ * Guarda la ficha COMO BORRADOR: las columnas vivas no se tocan, así que el alumno
+ * sigue viendo lo publicado. Se vuelca recién con publishSongMeta.
+ */
+export async function saveSongDraft(id: string, song: Song): Promise<void> {
+  const { error } = await supabase.from('songs').update({ draft: stripSong(song) }).eq('id', id);
+  if (error) throw error;
+}
+
+/** Vuelca el borrador de la ficha a las columnas vivas y lo limpia, en una transacción. */
+export async function publishSongMeta(id: string): Promise<void> {
+  const { error } = await supabase.rpc('publish_song_meta', { p_song_id: id });
+  if (error) throw error;
+}
+
+/** Tira los cambios de la ficha y vuelve a lo publicado. */
+export async function discardSongDraft(id: string): Promise<void> {
+  const { error } = await supabase.from('songs').update({ draft: null }).eq('id', id);
   if (error) throw error;
 }
 
 export async function deleteSong(id: string): Promise<void> {
-  // Los charts se borran primero: la FK charts.song_id no tiene cascade.
+  // Se junta el audio antes de borrar la fila: después ya no se sabe cuál era.
+  const { data } = await supabase.from('songs').select('audio_path, draft').eq('id', id).single();
+  const paths = [
+    (data as { audio_path?: string } | null)?.audio_path,
+    (data as { draft?: { audio_path?: string } } | null)?.draft?.audio_path,
+  ].filter((p): p is string => !!p);
+
   const { error: cErr } = await supabase.from('charts').delete().eq('song_id', id);
   if (cErr) throw cErr;
   const { error } = await supabase.from('songs').delete().eq('id', id);
   if (error) throw error;
+
+  // Si esto falla, el nivel igual quedó borrado: el archivo suelto no rompe nada.
+  if (paths.length) await supabase.storage.from(BUCKET).remove([...new Set(paths)]).catch(() => {});
 }
 
 function stripSong(s: Song) {
@@ -262,10 +306,16 @@ export async function duplicateSong(source: SongRow): Promise<SongRow> {
   let n = 2;
   while (slugs.has(slug)) slug = `${source.slug}-copia-${n++}`;
 
+  // Se copia la ficha efectiva (con el borrador aplicado): es lo que el autor ve.
+  const base = effectiveSong(source);
   const created = await insertSong({
-    ...source,
+    ...base,
     slug,
-    title: `${source.title} (copia)`,
+    title: `${base.title} (copia)`,
+    // El audio no se duplica: el archivo es el mismo y borrar la copia se llevaría
+    // el original. Si la copia lo necesita, se vuelve a subir.
+    audio_path: null,
+    audio_offset_s: 0,
   });
 
   // Se copian todas las capas del nivel (lo jugable y el fondo). De cada una,

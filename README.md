@@ -41,11 +41,20 @@ El registro público está desactivado a propósito: nadie se crea una cuenta so
 
 ## Borrador y publicado
 
-Un nivel puede tener varios charts en la base, pero **solo uno publicado** por canción y modo.
+**Nada de lo que edites llega al alumno hasta que apretás Publicar.** Eso vale para las dos
+mitades de la pantalla:
 
-- **Guardar borrador** → se guarda con `published = false`. Los alumnos **no** lo ven.
-- **Publicar** → ese chart pasa a estar en vivo y el anterior queda como historial.
-- **Descartar borrador** → vuelve a la versión que está publicada.
+| | Dónde se guarda el borrador |
+|---|---|
+| La **partitura** (grilla de acordes o notas, y el fondo) | Un chart nuevo con `published = false`. Solo uno queda publicado por canción y modo; los demás son historial. |
+| La **ficha** (título, BPM, compás, acceso, audio) | La columna `draft` de `songs`. Las columnas de al lado siguen siendo lo que ve el alumno. |
+
+- **Guardar borrador** → se guarda todo escondido. Los alumnos siguen con lo publicado.
+- **Publicar** → pasa a estar en vivo: la partitura y la ficha juntas.
+- **Descartar** → vuelve a lo publicado. Hay un botón para la partitura y otro para la ficha.
+
+Mientras la ficha tenga cambios sin publicar, el editor te muestra **qué están viendo los
+alumnos en ese momento**, para que no haya sorpresas.
 
 Un nivel sin ningún chart publicado directamente no aparece en el mapa de niveles de la app.
 
@@ -144,8 +153,8 @@ Como ninguna grabación arranca exacta, está el control de **calce**: si la mú
 bajás el número, si entra temprano lo subís. Escuchá con el metrónomo prendido — el primer
 golpe de la grabación tiene que caer junto al primer clic después de la cuenta de entrada.
 
-> Los datos del nivel (título, BPM, audio) viven en la tabla `songs`, que **no tiene borrador**:
-> se guardan en vivo apenas apretás Guardar. El borrador cubre la partitura, no la ficha.
+La ficha del nivel (título, BPM, audio…) también tiene borrador: al guardar, los alumnos siguen
+viendo lo publicado, y el editor te avisa qué están viendo mientras tanto.
 
 ---
 
