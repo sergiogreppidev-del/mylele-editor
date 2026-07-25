@@ -28,7 +28,9 @@ export async function checkIsAdmin(): Promise<boolean> {
  * La clave de Gemini vive allá, no acá: este sitio es público y una clave en el
  * navegador se la lleva cualquiera que abra las herramientas de desarrollo.
  */
-export async function generarConGemini(prompt: string): Promise<{ texto: string; cortado: boolean }> {
+export async function generarConGemini(
+  prompt: string,
+): Promise<{ texto: string; cortado: boolean; modelo: string }> {
   const { data, error } = await supabase.functions.invoke('generar-nivel', { body: { prompt } });
   if (error) {
     // El cuerpo del error trae el motivo real; sin esto solo se ve "non-2xx".
@@ -42,7 +44,11 @@ export async function generarConGemini(prompt: string): Promise<{ texto: string;
     throw new Error(detalle);
   }
   if (data?.error) throw new Error(data.error);
-  return { texto: String(data?.texto ?? ''), cortado: !!data?.cortado };
+  return {
+    texto: String(data?.texto ?? ''),
+    cortado: !!data?.cortado,
+    modelo: String(data?.modelo ?? ''),
+  };
 }
 
 /** Mensaje en castellano para los errores que más van a aparecer. */

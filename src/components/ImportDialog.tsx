@@ -49,6 +49,7 @@ export function ImportDialog(props: Props) {
   const [aplicarSetup, setAplicarSetup] = useState(true);
   const [generando, setGenerando] = useState(false);
   const [errorIA, setErrorIA] = useState<string | null>(null);
+  const [modeloUsado, setModeloUsado] = useState<string | null>(null);
 
   /** Generar el nivel entero reemplaza las tres capas: agregar al final no aplica. */
   const esNivelCompleto = target === 'nivel';
@@ -157,7 +158,7 @@ export function ImportDialog(props: Props) {
     setGenerando(true);
     setErrorIA(null);
     try {
-      const { texto, cortado } = await generarConGemini(
+      const { texto, cortado, modelo } = await generarConGemini(
         buildAiPrompt({
           target, title: props.title, bpm: props.bpm, timeSig: props.timeSig,
           beatsPerBar, bars, knownChords, pedido, imponerMedida, melodiaDelNivel,
@@ -165,9 +166,10 @@ export function ImportDialog(props: Props) {
       );
       // Gemini a veces envuelve la respuesta en un bloque de código igual.
       setText(texto.replace(/^```[a-z]*\n?/i, '').replace(/```\s*$/, '').trim());
+      setModeloUsado(modelo);
       if (cortado) {
         setErrorIA(
-          'Gemini se quedó sin espacio y cortó la respuesta. Revisá el final: puede faltar el último tramo.',
+          `${modelo} se quedó sin espacio y cortó la respuesta. Revisá el final: puede faltar el último tramo.`,
         );
       }
     } catch (e) {
@@ -199,13 +201,16 @@ export function ImportDialog(props: Props) {
               onChange={(e) => setPedido(e.target.value)}
             />
             <CandyButton small tone="lime" onClick={() => void generar()} disabled={generando}>
-              {generando ? '⏳ Generando…' : '✨ Generar con Gemini'}
+              {generando ? '⏳ Generando…' : '✨ Generar con IA'}
             </CandyButton>
             <CandyButton small tone="ghost" onClick={() => void copyPrompt()}>
               {copied ? '✓ Copiado' : '📋 Copiar'}
             </CandyButton>
           </div>
           {errorIA && <div className="notice bad" style={{ marginTop: 8 }}>{errorIA}</div>}
+          {modeloUsado && !errorIA && (
+            <p className="muted" style={{ margin: '6px 0 0' }}>Respondió {modeloUsado}.</p>
+          )}
           {!esNivelCompleto && (
             <label className="row" style={{ gap: 7, marginTop: 8 }}>
               <input
