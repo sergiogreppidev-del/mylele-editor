@@ -15,14 +15,35 @@ export type ChartMode = 'chords' | 'melody';
 export const BACKING_MODE = 'backing';
 
 /**
- * Dificultad de lo que toca el alumno. NO la elige él: se la impone el juego
- * según cómo va progresando. La música de fondo es la misma en las dos.
+ * Sub-nivel de lo que toca el alumno. NO lo elige él: se lo impone el juego según
+ * cómo va progresando. La música de fondo es la MISMA en los dos.
+ *
+ * OJO CON EL NOMBRE. Los valores 'facil'/'dificil' que guarda la base NO son las
+ * tres grandes dificultades del juego. El plan a largo plazo es:
+ *
+ *   ETAPA (Fácil · Intermedia · Difícil) — se distinguen por CUÁNTO vocabulario
+ *     se usa: cuántos acordes y cuántas notas entran en juego. Hoy todo el
+ *     contenido está dentro de la etapa Fácil, que usa los 4 acordes principales.
+ *     Todavía no está definido qué usan las otras dos, así que no existe en el
+ *     código: cuando se defina, va a necesitar su propia columna.
+ *
+ *   SUB-NIVEL (esto) — dentro de una etapa, con el MISMO vocabulario, cambia
+ *     cuántos acordes por compás toca el alumno. Es lo único que separa a estos
+ *     dos, y es lo único que hay que cambiarle a la IA al pedirle la canción.
  */
 export type Difficulty = 'facil' | 'dificil';
-export const DIFICULTADES: { id: Difficulty; label: string }[] = [
-  { id: 'facil', label: 'Fácil' },
-  { id: 'dificil', label: 'Difícil' },
+
+/** La etapa en la que está todo el contenido de hoy. Ver el comentario de arriba. */
+export const ETAPA_ACTUAL = 'Fácil';
+
+export const DIFICULTADES: { id: Difficulty; label: string; detalle: string }[] = [
+  { id: 'facil', label: 'Fácil 1', detalle: 'un acorde por compás' },
+  { id: 'dificil', label: 'Fácil 2', detalle: 'hasta dos acordes por compás' },
 ];
+
+export function dificultadLabel(d: Difficulty): string {
+  return DIFICULTADES.find((x) => x.id === d)?.label ?? d;
+}
 export type AnyChartMode = ChartMode | typeof BACKING_MODE;
 export type StrumDir = 'd' | 'u';
 export type UkeString = 'G' | 'C' | 'E' | 'A';

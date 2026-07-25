@@ -5,8 +5,8 @@ import { buildAiPrompt, TARGET_LABEL } from '../lib/aiPrompt';
 import type { ImportTarget } from '../lib/aiPrompt';
 import { parseNotation, toNotation } from '../lib/notation';
 import type { SuggestedSetup } from '../lib/notation';
-import { parseBacking, parseEvents, tidy } from '../lib/chartFormat';
-import type { BackingEvent, ChordEvent, Issue, MelodyEvent } from '../lib/chartFormat';
+import { DIFICULTADES, ETAPA_ACTUAL, parseBacking, parseEvents, tidy } from '../lib/chartFormat';
+import type { BackingEvent, ChordEvent, Difficulty, Issue, MelodyEvent } from '../lib/chartFormat';
 import { friendlyError, generarConGemini } from '../lib/supabase';
 
 interface Props {
@@ -17,6 +17,9 @@ interface Props {
   beatsPerBar: number;
   bars: number;
   knownChords: string[];
+  /** Sub-nivel que se está creando. Se elige ACÁ, antes de pedirle nada a la IA. */
+  dificultad: Difficulty;
+  onDificultad: (d: Difficulty) => void;
   /** Eventos actuales, para ofrecer "agregar al final" y exportar. */
   currentChords: ChordEvent[];
   currentMelody: MelodyEvent[];
@@ -53,6 +56,13 @@ export function ImportDialog(props: Props) {
 
   /** Generar el nivel entero reemplaza las tres capas: agregar al final no aplica. */
   const esNivelCompleto = target === 'nivel';
+
+  /**
+   * El sub-nivel solo cambia la capa que toca el alumno, y hoy eso son los acordes.
+   * Pedirlo cuando se importa una melodía o el fondo sería una perilla que no hace nada.
+   */
+  const eligeDificultad = esNivelCompleto || target === 'chords';
+  const difActual = DIFICULTADES.find((d) => d.id === props.dificultad);
 
   /** La capa que se está importando, tal como está ahora. */
   const current: { t: number; dur: number }[] = esNivelCompleto
@@ -134,11 +144,17 @@ export function ImportDialog(props: Props) {
     return toNotation(fuente as never, beatsPerBar);
   }, [target, props.currentMelody, props.currentBacking, beatsPerBar]);
 
-  async function copyPrompt() {
-    const prompt = buildAiPrompt({
+  /** Un solo lugar arma el pedido: copiarlo a mano y generarlo acá tienen que dar lo mismo. */
+  function armarPrompt(): string {
+    return buildAiPrompt({
       target, title: props.title, bpm: props.bpm, timeSig: props.timeSig,
       beatsPerBar, bars, knownChords, pedido, imponerMedida, melodiaDelNivel,
+      dificultad: props.dificultad,
     });
+  }
+
+  async function copyPrompt() {
+    const prompt = armarPrompt();
     try {
       await navigator.clipboard.writeText(prompt);
       setCopied(true);
@@ -158,12 +174,7 @@ export function ImportDialog(props: Props) {
     setGenerando(true);
     setErrorIA(null);
     try {
-      const { texto, cortado, modelo } = await generarConGemini(
-        buildAiPrompt({
-          target, title: props.title, bpm: props.bpm, timeSig: props.timeSig,
-          beatsPerBar, bars, knownChords, pedido, imponerMedida, melodiaDelNivel,
-        }),
-      );
+      const { texto, cortado, modelo } = await generarConGemini(armarPrompt());
       // Gemini a veces envuelve la respuesta en un bloque de código igual.
       setText(texto.replace(/^```[a-z]*\n?/i, '').replace(/```\s*$/, '').trim());
       setModeloUsado(modelo);
@@ -193,6 +204,36 @@ export function ImportDialog(props: Props) {
         {/* --- paso 1: pedirle a la IA --- */}
         <div className="step">
           <div className="section-title">1 · Pedile la canción a una IA</div>
+
+          {/* Va ANTES del pedido, no después: es lo que le cambia las reglas a la IA.
+              Si se elige al final, lo que ya generó quedó con la densidad equivocada. */}
+          {eligeDificultad && (
+            <div className="notice" style={{ marginBottom: 10 }}>
+              <div className="row" style={{ flexWrap: 'wrap' }}>
+                <span>
+                  <b>Sub-nivel</b> a crear:
+                </span>
+                {DIFICULTADES.map((d) => (
+                  <CandyButton
+                    key={d.id}
+                    small
+                    tone={props.dificultad === d.id ? 'grape' : 'ghost'}
+                    disabled={generando}
+                    onClick={() => props.onDificultad(d.id)}
+                  >
+                    {d.label}
+                  </CandyButton>
+                ))}
+                <span className="muted grow">→ {difActual?.detalle}</span>
+              </div>
+              <p className="muted" style={{ margin: '6px 0 0' }}>
+                Etapa <b>{ETAPA_ACTUAL}</b> · {knownChords.length} acordes ({knownChords.join(', ')}).
+                Los dos sub-niveles usan los mismos acordes: lo único que cambia es cuántos entran
+                por compás. <b>La música de fondo es idéntica en los dos.</b>
+              </p>
+            </div>
+          )}
+
           <div className="row">
             <input
               className="f grow"

@@ -15,8 +15,8 @@ import { ImportDialog } from '../components/ImportDialog';
 import { STRING_MIDI, midiToPitch, validateBacking } from '../lib/notation';
 import type { ImportTarget } from '../lib/aiPrompt';
 import {
-  BACKING_MODE, BPM_MAX, BPM_MIN, DIFICULTADES, MAX_FRET, UKE_STRINGS, barCount, beatsPerBar, chartLengthBeats,
-  dirForBeat, hasErrors, tidy, validateChart, validateSong,
+  BACKING_MODE, BPM_MAX, BPM_MIN, DIFICULTADES, ETAPA_ACTUAL, MAX_FRET, UKE_STRINGS, barCount,
+  beatsPerBar, chartLengthBeats, dirForBeat, hasErrors, tidy, validateChart, validateSong,
 } from '../lib/chartFormat';
 import type {
   BackingEvent, ChartEvent, ChartMode, ChordEvent, Difficulty, MelodyEvent, Song, StrumPattern,
@@ -161,6 +161,17 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   function patch(next: Partial<Song>) {
     setSong((s) => ({ ...s, ...next }));
     setDirty(true);
+  }
+
+  /**
+   * Cambiar de sub-nivel recarga el chart desde la base (el efecto de arriba depende
+   * de `dificultad`), así que lo que no esté guardado se pierde. Por eso se avisa.
+   */
+  function cambiarDificultad(d: Difficulty) {
+    if (d === dificultad) return;
+    if (dirty && !window.confirm('Tenés cambios sin guardar. ¿Cambiar de sub-nivel igual?')) return;
+    setDificultad(d);
+    setSelected(null);
   }
 
   /** "Nivel 5 · Vals de las flores" → "nivel-5-vals-de-las-flores" */
@@ -641,10 +652,11 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       {/* ---------- 2 · MÚSICA ---------- */}
       {paso === 'musica' && (
         <>
-          {/* La dificultad la impone el juego según cómo progresa el alumno; acá
-              solo se elige cuál de las dos versiones se está editando. */}
+          {/* El sub-nivel lo impone el juego según cómo progresa el alumno; acá solo
+              se elige cuál de los dos se está editando. */}
           <div className="resumen">
-            <span className="dato">Estás editando la versión</span>
+            <span className="dato">Etapa {ETAPA_ACTUAL}</span>
+            <span className="dato">Editando</span>
             {DIFICULTADES.map((d) => {
               const existe = !!loaded && !!workingChart(loaded, mode, d.id);
               return (
@@ -652,11 +664,8 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
                   key={d.id}
                   small
                   tone={dificultad === d.id ? 'grape' : 'ghost'}
-                  onClick={() => {
-                    if (dirty && !window.confirm('Tenés cambios sin guardar. ¿Cambiar de versión igual?')) return;
-                    setDificultad(d.id);
-                    setSelected(null);
-                  }}
+                  onClick={() => cambiarDificultad(d.id)}
+                  title={d.detalle}
                 >
                   {d.label}
                   {existe ? ' ✓' : ''}
@@ -664,9 +673,9 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
               );
             })}
             <span className="muted grow">
-              {dificultad === 'dificil' && !workChart
-                ? 'La versión difícil arranca en blanco. La música de fondo es la misma para las dos.'
-                : 'El alumno no elige: el juego le da una u otra según su progreso.'}
+              {!workChart
+                ? `${DIFICULTADES.find((d) => d.id === dificultad)?.label} todavía está en blanco. El fondo es el mismo para los dos.`
+                : `${DIFICULTADES.find((d) => d.id === dificultad)?.detalle} · el alumno no elige, se lo da el juego.`}
             </span>
           </div>
 
@@ -1124,6 +1133,8 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
           beatsPerBar={bpb}
           bars={bars}
           knownChords={chords.map((c) => c.id)}
+          dificultad={dificultad}
+          onDificultad={cambiarDificultad}
           currentChords={events}
           currentMelody={melody}
           currentBacking={backingNotes}

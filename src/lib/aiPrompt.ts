@@ -7,6 +7,7 @@
    propio tiene sentido imponerle la medida. */
 
 import type { NotationTarget } from './notation';
+import type { Difficulty } from './chartFormat';
 
 /** 'nivel' genera las tres capas de una sola vez. */
 export type ImportTarget = NotationTarget | 'nivel';
@@ -19,6 +20,12 @@ interface PromptOptions {
   beatsPerBar: number;
   bars: number;
   knownChords: string[];
+  /**
+   * Sub-nivel que se está creando. Cambia UNA sola cosa: cuántos acordes por
+   * compás toca el alumno. La música de fondo no se toca — es la misma canción
+   * en los dos, y simplificarla "para que combine" es justamente el error.
+   */
+  dificultad?: Difficulty;
   /** Qué canción o idea quiere el autor. Puede ir vacío. */
   pedido?: string;
   /**
@@ -43,10 +50,46 @@ Una sola línea con elementos separados por espacios.
 
 const SOLO_LA_LINEA = `Respondé ÚNICAMENTE con eso, sin explicaciones, sin comillas y sin bloque de código.`;
 
+/**
+ * La densidad de acordes es lo ÚNICO que separa a un sub-nivel del otro, así que
+ * las reglas se escriben enteras para cada uno en vez de matizar un texto común:
+ * un "salvo que sea el sub-nivel fácil" al final de una regla se lo saltean.
+ */
+function reglasDensidad(dificultad: Difficulty): string[] {
+  if (dificultad === 'facil') {
+    return [
+      'CUÁNTOS ACORDES POR COMPÁS — regla dura, no la negocies',
+      '- UN SOLO acorde por compás, ocupando el compás ENTERO: en 4/4 son todos "X/4"; en 3/4,',
+      '  todos "X/3". La duración del acorde es igual a los tiempos del compás, siempre.',
+      '- Está PROHIBIDO cambiar de acorde dentro de un compás. Nada de "F/2 C/2".',
+      '- Si la armonía real de la canción cambia en la mitad del compás, ignorá el segundo',
+      '  acorde y quedate con el que suena en el tiempo fuerte. Se pierde un matiz y está bien:',
+      '  el alumno recién está aprendiendo a cambiar de posición y necesita tiempo para llegar.',
+      '- Que un mismo acorde se repita varios compases seguidos NO es un problema, es lo esperado.',
+      '- Único caso aparte: si hay anacrusa, el primer compás es corto y lleva un solo acorde',
+      '  (o un silencio) que dure exactamente lo que ese compás corto.',
+      '',
+    ];
+  }
+  return [
+    'CUÁNTOS ACORDES POR COMPÁS — regla dura, no la negocies',
+    '- Como máximo DOS acordes por compás. Nunca tres o más.',
+    '- Cuando la armonía cambia en la mitad del compás, escribí los dos, cada uno de media',
+    '  duración: en 4/4 es "F/2 C/2". Ese es justo el ejercicio de este sub-nivel.',
+    '- Pero no metas un cambio de más solo para que sea difícil: si en ese compás la canción',
+    '  tiene un solo acorde, va uno solo, ocupando el compás entero.',
+    '- Los dos acordes de un compás partido tienen que ser DISTINTOS. "C/2 C/2" es un error:',
+    '  eso es un solo acorde de compás entero.',
+    '- Que un mismo acorde dure varios compases seguidos sigue estando bien.',
+    '',
+  ];
+}
+
 export function buildAiPrompt(o: PromptOptions): string {
   if (o.target === 'nivel') return promptNivelCompleto(o);
 
   const pedido = o.pedido?.trim();
+  const dif: Difficulty = o.dificultad ?? 'facil';
   const partes: string[] = [
     'Sos un asistente que escribe partituras para MyLele, una app para aprender ukelele.',
     '',
@@ -102,19 +145,14 @@ export function buildAiPrompt(o: PromptOptions): string {
       `- Usá ÚNICAMENTE estos acordes: ${o.knownChords.join(', ') || '(no hay acordes cargados)'}. No inventes otros.`,
       '- Si la canción necesita un acorde que no está en esa lista, reemplazalo por el más parecido',
       '  (por ejemplo G7 -> G, Dm -> Am) y seguí adelante.',
-      '',
-      '- LO MÁS IMPORTANTE: poné cada acorde donde REALMENTE cambia en la canción, y hacelo durar',
-      '  lo que dura ahí. Muchas canciones cambian de acorde en la mitad del compás: eso se escribe',
-      '  con dos acordes de media duración, por ejemplo "F/2 C/2" en un compás de 4/4.',
-      '- NO pongas un acorde por compás por comodidad. Si la armonía cambia dos veces en un compás,',
-      '  escribí los dos; si un acorde dura tres compases, escribilo como uno solo largo.',
+      '- Antes de escribir, pensá la melodía y fijate qué notas caen en cada compás: el acorde',
+      '  sale de ahí, no de la memoria.',
       '- No estires ni repitas nada para llegar a una cantidad redonda de compases: la canción dura',
       '  lo que dura. Twinkle Twinkle, por ejemplo, son 12 compases de 4/4, no 16.',
-      '- Antes de escribir, pensá la melodía y fijate en qué sílaba cae cada cambio de acorde.',
-      '',
       '- Podés agregar :d (rasgueo hacia abajo) o :u (hacia arriba) después de la duración.',
       '  Si no ponés nada, es hacia abajo.',
       '',
+      ...reglasDensidad(dif),
     );
 
     // Si el nivel ya tiene la melodía cargada, se la damos: armonizar ESTA melodía
@@ -156,11 +194,21 @@ export function buildAiPrompt(o: PromptOptions): string {
   /* ---- Ejemplo ---- */
   const bpb = o.imponerMedida ? o.beatsPerBar : 4;
   if (o.target === 'chords') {
+    // El ejemplo tiene que mostrar la densidad que se está pidiendo: si muestra un
+    // compás partido cuando se pidió uno por compás, la IA copia el ejemplo.
     partes.push(
       'MINIEJEMPLO DE LA FORMA — 4 compases inventados, NO es tu respuesta.',
-      'Fijate que el tercero cambia de acorde en la mitad.',
-      ...(o.imponerMedida ? [] : ['BPM: 92', 'COMPAS: 4/4']),
-      `| C/${bpb} | Am/${bpb} | F/${bpb / 2} C/${bpb / 2} | G/${bpb} |`,
+      ...(dif === 'facil'
+        ? [
+            'Fijate que todos ocupan el compás entero y que el C se repite dos veces: así va.',
+            ...(o.imponerMedida ? [] : ['BPM: 92', 'COMPAS: 4/4']),
+            `| C/${bpb} | C/${bpb} | F/${bpb} | G/${bpb} |`,
+          ]
+        : [
+            'Fijate que el tercero cambia de acorde en la mitad y los otros no.',
+            ...(o.imponerMedida ? [] : ['BPM: 92', 'COMPAS: 4/4']),
+            `| C/${bpb} | Am/${bpb} | F/${bpb / 2} C/${bpb / 2} | G/${bpb} |`,
+          ]),
     );
   } else {
     partes.push(
@@ -198,6 +246,7 @@ export const TARGET_LABEL: Record<ImportTarget, string> = {
 function promptNivelCompleto(o: PromptOptions): string {
   const pedido = o.pedido?.trim();
   const acordes = o.knownChords.join(', ') || '(no hay acordes cargados)';
+  const dif: Difficulty = o.dificultad ?? 'facil';
 
   return [
     'Sos un asistente que escribe niveles para MyLele, una app para aprender ukelele.',
@@ -217,6 +266,8 @@ function promptNivelCompleto(o: PromptOptions): string {
     'de verdad: rica, con movimiento y entretenida. NO tiene ninguna limitación de dificultad.',
     'ACORDES es EL JUEGO, lo único que toca el alumno. Eso sí tiene que ser simple.',
     'No simplifiques la música para que combine con el juego: son cosas distintas.',
+    'Más abajo hay un límite de cuántos acordes por compás. Ese límite es SOLO para la capa',
+    'ACORDES. MELODIA, BAJO y ACOMP no se tocan: la canción es la misma y suena igual de rica.',
     '',
     'CÓMO QUE SEA UN ARREGLO Y NO UN METRÓNOMO CON ALTURAS',
     '- El error típico es poner el bajo en el tiempo 1 y el mismo bloque de acordes en los demás,',
@@ -249,13 +300,14 @@ function promptNivelCompleto(o: PromptOptions): string {
     '  que corresponder a lo que suena en el compás 3 de la melodía. Si hay anacrusa, las cuatro',
     '  capas la comparten.',
     `- ACORDES: usá únicamente estos: ${acordes}. Si la canción pide otro, poné el más parecido`,
-    '  (G7 -> G, Dm -> Am). Cada acorde va DONDE REALMENTE CAMBIA la armonía, aunque cambie en la',
-    '  mitad del compás: eso se escribe con dos acordes de media duración, por ejemplo "F/2 C/2".',
-    '  No pongas uno por compás por comodidad.',
+    '  (G7 -> G, Dm -> Am). Cuántos entran por compás está en la sección siguiente.',
     '- MELODIA: notas entre C4 y A5 (el rango del ukelele), una sola por vez.',
     '- BAJO: registro grave, C2 a C4. Una nota por vez.',
     '- ACOMP: registro medio, C3 a C6. Para que suenen varias notas juntas se escriben entre',
     '  corchetes: "[C3,E3,G3]/2". Podés mezclar notas sueltas y corchetes en el mismo renglón.',
+    '',
+    ...reglasDensidad(dif),
+    'Repito porque es el error más común: esto limita SOLO el renglón ACORDES.',
     '',
     'FORMATO DE SALIDA',
     'Los tiempos se miden en TIEMPOS (beats): 1 = negra, .5 = corchea, 2 = blanca, 1.5 = con puntillo.',
@@ -286,6 +338,10 @@ function promptNivelCompleto(o: PromptOptions): string {
     '2. ¿Las cuatro capas tienen la MISMA cantidad de compases y suman los mismos tiempos?',
     '3. ¿Cada compás suma exactamente los tiempos del compás, salvo el primero y el último?',
     '4. ¿Está la canción completa, sin abreviar ninguna repetición?',
+    dif === 'facil'
+      ? '5. En ACORDES, ¿hay UN SOLO acorde en cada compás, ocupando el compás entero?'
+      : '5. En ACORDES, ¿ningún compás tiene más de DOS acordes, y los partidos son distintos entre sí?',
+    '6. ¿MELODIA, BAJO y ACOMP quedaron ricos, sin haberlos simplificado por el límite de acordes?',
     '',
     'RESPUESTA',
     'Devolvé solamente esos seis renglones, sin explicaciones, sin comentarios y sin bloque de',

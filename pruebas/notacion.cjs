@@ -275,11 +275,9 @@ const P = require('./build/aiPrompt.js');
 const base = { target: 'chords', title: 'T', bpm: 80, timeSig: '4/4', beatsPerBar: 4, bars: 8,
                knownChords: ['C', 'Am', 'F', 'G'], pedido: 'Twinkle Twinkle', imponerMedida: false };
 const p1 = P.buildAiPrompt(base);
-check('NO le dice "un acorde por compás"', !/un acorde por comp[aá]s ya est[aá] bien/i.test(p1));
-check('le pide el ritmo armónico real', /cambian de acorde en la mitad del comp/i.test(p1));
 check('le prohíbe estirar para redondear', /no estires ni repitas/i.test(p1));
 check('le pide que declare BPM y compás', /BPM: <n/.test(p1) && /COMPAS: </.test(p1));
-check('el ejemplo muestra un cambio a mitad de compás', /F\/2 C\/2/.test(p1));
+check('saca el acorde de la melodía, no de la memoria', /no de la memoria/.test(p1));
 
 const p2 = P.buildAiPrompt({ ...base, melodiaDelNivel: 'C4/1 C4/1 G4/1 G4/1 | A4/1 A4/1 G4/2' });
 check('incluye la melodía del nivel cuando la hay', /armoniz[aá] exactamente esta/i.test(p2) && /C4\/1 C4\/1 G4\/1/.test(p2));
@@ -288,6 +286,41 @@ check('sin melodía no la menciona', !/armoniz[aá] exactamente esta/i.test(p1))
 const p3 = P.buildAiPrompt({ ...base, imponerMedida: true });
 check('con medida impuesta sí fija los compases', /Extensi[oó]n: 8 compases/.test(p3));
 check('con medida impuesta no pide la cabecera', !/BPM: <n/.test(p3));
+
+/* Los dos sub-niveles de la etapa Fácil usan los MISMOS acordes: lo único que los
+   separa es cuántos entran por compás. Y ese límite es solo de la capa que toca el
+   alumno — la música de fondo no se toca, que es el error que más se repite. */
+console.log('\n=== El sub-nivel cambia la densidad de acordes ===');
+{
+  const facil = P.buildAiPrompt({ ...base, dificultad: 'facil' });
+  const dificil = P.buildAiPrompt({ ...base, dificultad: 'dificil' });
+  check('sin especificar, es el sub-nivel fácil', P.buildAiPrompt(base) === facil);
+
+  check('fácil: exige uno por compás', /UN SOLO acorde por comp[aá]s/.test(facil));
+  check('fácil: prohíbe partir el compás', /PROHIBIDO cambiar de acorde dentro de un comp/.test(facil));
+  check('fácil: el ejemplo no parte ningún compás', /\| C\/4 \| C\/4 \| F\/4 \| G\/4 \|/.test(facil));
+  check('fácil: no habla de dos por compás', !/DOS acordes por comp/.test(facil));
+
+  check('difícil: permite hasta dos', /m[aá]ximo DOS acordes por comp[aá]s/.test(dificil));
+  check('difícil: prohíbe tres o más', /Nunca tres o m[aá]s/.test(dificil));
+  check('difícil: el ejemplo parte un compás', /\| C\/4 \| Am\/4 \| F\/2 C\/2 \| G\/4 \|/.test(dificil));
+  check('difícil: los dos de un compás partido van distintos', /tienen que ser DISTINTOS/.test(dificil));
+
+  // Nivel completo: el límite tiene que aplicar SOLO al renglón de acordes.
+  const nivel = { target: 'nivel', title: 'T', bpm: 80, timeSig: '4/4', beatsPerBar: 4, bars: 8,
+                  knownChords: ['C', 'Am', 'F', 'G'], pedido: 'x', imponerMedida: false };
+  const nivelF = P.buildAiPrompt({ ...nivel, dificultad: 'facil' });
+  const nivelD = P.buildAiPrompt({ ...nivel, dificultad: 'dificil' });
+  check('nivel · fácil: uno por compás', /UN SOLO acorde por comp[aá]s/.test(nivelF));
+  check('nivel · difícil: hasta dos', /m[aá]ximo DOS acordes por comp[aá]s/.test(nivelD));
+  check('nivel · el límite es solo de ACORDES', /SOLO el rengl[oó]n ACORDES/.test(nivelF));
+  check('nivel · la música sigue sin límite en los dos',
+    /ninguna limitaci[oó]n de dificultad/.test(nivelF) && /ninguna limitaci[oó]n de dificultad/.test(nivelD));
+  check('nivel · la verificación final se adapta',
+    /UN SOLO acorde en cada comp[aá]s/.test(nivelF) && /m[aá]s de DOS acordes/.test(nivelD));
+  check('nivel · sigue pidiendo no simplificar la música por el límite',
+    /sin haberlos simplificado por el l[ií]mite/.test(nivelF));
+}
 
 console.log('\n=== Ida y vuelta (exportar y volver a leer) ===');
 const texto = N.toNotation(r5.chordEvents, 4);
