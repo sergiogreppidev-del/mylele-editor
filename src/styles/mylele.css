@@ -179,6 +179,61 @@ input.f[type='checkbox'] { width: 22px; height: 22px; accent-color: var(--grape)
 .chip:active { transform: translateY(4px); box-shadow: 0 1px 0 rgba(58,42,99,.3); }
 .chip.sel { outline: 4px solid var(--ink); outline-offset: 3px; }
 
+/* ---- Barra de pasos del editor ----
+   Nombre propio (wstep): el diálogo de importar ya usa .step para sus secciones. */
+.steps { display: flex; gap: 8px; flex-wrap: wrap; }
+.wstep {
+  flex: 1 1 130px; display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-family: 'Baloo 2', sans-serif; font-weight: 800; font-size: 14px; color: var(--ink-2);
+  background: var(--paper); border: 2.5px solid #e0d6f2; border-radius: 15px;
+  padding: 9px 12px; text-align: left;
+}
+.wstep:hover { border-color: var(--lock); }
+.wstep-n {
+  flex: none; width: 24px; height: 24px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 13px;
+  background: #efe9fa; color: var(--ink-2);
+}
+.wstep.done { color: var(--ink); }
+.wstep.done .wstep-n { background: var(--lime); color: #fff; }
+.wstep.on { color: var(--ink); border-color: var(--ink); box-shadow: 0 4px 0 rgba(58, 42, 99, 0.18); }
+.wstep.on .wstep-n { background: var(--grape); color: #fff; }
+.wstep.bad { border-color: var(--melon); }
+.wstep.bad .wstep-n { background: var(--melon); color: #fff; }
+@media (max-width: 560px) { .wstep-l { display: none; } .wstep { flex: 0 0 auto; } }
+
+/* ---- Resumen plegado de la ficha ---- */
+.resumen {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--paper); border: 3px solid var(--ink); border-radius: 20px; padding: 11px 14px;
+  box-shadow: 0 4px 0 rgba(58, 42, 99, 0.16);
+}
+.resumen b { font-family: 'Titan One', cursive; font-weight: 400; font-size: 16px; }
+.resumen .dato { font-size: 13.5px; font-weight: 700; color: var(--ink-2); }
+
+/* ---- Barra fija de acciones ---- */
+.actionbar {
+  position: sticky; bottom: 0; z-index: 20;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: rgba(255, 248, 231, 0.96); backdrop-filter: blur(6px);
+  border-top: 3px solid var(--ink); margin: 8px -18px -18px;
+  padding: 12px 18px calc(12px + env(safe-area-inset-bottom));
+}
+
+/* ---- Campos avanzados plegados ---- */
+details.avanzado > summary {
+  cursor: pointer; font-weight: 800; font-size: 13px; color: var(--ink-2);
+  list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 0;
+}
+details.avanzado > summary::-webkit-details-marker { display: none; }
+details.avanzado[open] > summary { margin-bottom: 10px; }
+
+/* ---- Encabezado de grupo del listado ---- */
+.group-title {
+  font-family: 'Titan One', cursive; font-weight: 400; font-size: 19px; color: var(--ink);
+  margin: 0; letter-spacing: .4px;
+}
+
 /* ---- Grilla de notas (tablatura) ---- */
 .mel-wrap { display: flex; align-items: flex-start; }
 .mel-labels { width: 34px; flex: none; }

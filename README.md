@@ -69,15 +69,26 @@ Un nivel tiene **dos capas**:
 
 Las dos se pueden importar con el botón **✨ Importar con IA**. El ciclo es:
 
-1. **Copiar instrucciones** → arma un pedido con el formato, el compás, el tempo y los acordes
-   de este nivel ya explicados. Lo pegás en Claude o ChatGPT.
+1. **Copiar instrucciones** → arma el pedido completo. Lo pegás en Claude o ChatGPT.
 2. **Pegar** lo que te devuelva.
 3. **Escuchar** antes de aceptar. La IA se equivoca con algunas melodías: este paso es el control
    de calidad, no un lujo.
 
+> **No hace falta que sepas el compás ni el tempo de la canción.** Por defecto se los pedimos a
+> la IA, que sí los sabe: te devuelve dos renglones (`BPM:` y `COMPAS:`) antes de la música, y el
+> editor te ofrece aplicarlos al nivel con un clic. Solo si estás armando un ejercicio propio
+> conviene tildar *"obligarla a usar…"* e imponerle vos la medida.
+
 ### La notación
 
-Una sola línea. Cada elemento es `NOMBRE/DURACION`, y la duración va en **tiempos**:
+Puede empezar con la medida que propone quien la escribió (opcional):
+
+```
+BPM: 120
+COMPAS: 3/4
+```
+
+Y después, una sola línea de música. Cada elemento es `NOMBRE/DURACION`, y la duración va en **tiempos**:
 
 ```
 notas     | G4/.5 G4/.5 | A4/1 G4/1 C5/1 | B4/2 r/1 |

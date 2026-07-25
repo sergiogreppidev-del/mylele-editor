@@ -132,6 +132,12 @@ export function validateBacking(events: BackingEvent[]): Issue[] {
 
 export type NotationTarget = 'chords' | 'melody' | 'backing';
 
+/** Lo que la IA propone para el nivel, leído de la cabecera de su respuesta. */
+export interface SuggestedSetup {
+  bpm?: number;
+  timeSig?: string;
+}
+
 export interface ParsedNotation {
   chordEvents: ChordEvent[];
   melodyEvents: MelodyEvent[];
@@ -140,6 +146,40 @@ export interface ParsedNotation {
   /** Semitonos que se aplicaron para que la melodía entrara en el ukelele. */
   appliedShift: number;
   totalBeats: number;
+  /** Compás y tempo propuestos por quien escribió la notación (si los declaró). */
+  suggested: SuggestedSetup;
+  /** Tiempos por compás que se usaron para verificar: los propuestos si los hay. */
+  beatsPerBarUsed: number;
+}
+
+const HEADER_RE = /^\s*(bpm|tempo|comp[aá]s|compas)\s*[:=]\s*(.+?)\s*$/i;
+
+/**
+ * Saca de la respuesta las líneas tipo "BPM: 120" o "COMPAS: 3/4".
+ * Es la forma de que la IA diga qué medida le corresponde a la canción, en vez de
+ * que se la impongamos nosotros sin saberla.
+ */
+function extractHeader(text: string): { rest: string; suggested: SuggestedSetup } {
+  const suggested: SuggestedSetup = {};
+  const kept: string[] = [];
+
+  for (const line of text.split('\n')) {
+    const m = HEADER_RE.exec(line);
+    if (!m) {
+      kept.push(line);
+      continue;
+    }
+    const clave = m[1].toLowerCase();
+    const valor = m[2].trim();
+    if (clave === 'bpm' || clave === 'tempo') {
+      const n = parseFloat(valor);
+      if (Number.isFinite(n)) suggested.bpm = Math.round(n);
+    } else {
+      const ts = /^(\d+)\s*\/\s*(\d+)$/.exec(valor);
+      if (ts) suggested.timeSig = `${ts[1]}/${ts[2]}`;
+    }
+  }
+  return { rest: kept.join('\n'), suggested };
 }
 
 interface Token {
@@ -180,9 +220,20 @@ export function parseNotation(
   const melodyEvents: MelodyEvent[] = [];
   const backingEvents: BackingEvent[] = [];
 
-  const clean = stripComments(text).trim();
+  // La cabecera se saca primero: si la IA declaró el compás, los compases se
+  // verifican contra ESE, no contra el que tenga puesto el nivel. Si no, cada
+  // compás daría un aviso falso solo porque la canción está en 3/4 y el nivel en 4/4.
+  const { rest, suggested } = extractHeader(stripComments(text));
+  const beatsPerBarUsed = suggested.timeSig
+    ? Number(suggested.timeSig.split('/')[0]) || opts.beatsPerBar
+    : opts.beatsPerBar;
+
+  const clean = rest.trim();
   if (!clean) {
-    return { chordEvents, melodyEvents, backingEvents, issues, appliedShift: 0, totalBeats: 0 };
+    return {
+      chordEvents, melodyEvents, backingEvents, issues,
+      appliedShift: 0, totalBeats: 0, suggested, beatsPerBarUsed,
+    };
   }
 
   const pieces = clean.split(/\s+/).filter(Boolean);
@@ -198,14 +249,14 @@ export function parseNotation(
     if (!seenAnyToken) return; // un "|" al principio no abre compás
     if (barSum === 0) return; // "|" al final o dos seguidas: no es un compás vacío
     barIndex++;
-    if (Math.abs(barSum - opts.beatsPerBar) > 0.001) {
+    if (Math.abs(barSum - beatsPerBarUsed) > 0.001) {
       // El primer compás corto es una anacrusa legítima (arranque en alzada).
-      const esAnacrusa = barIndex === 1 && barSum < opts.beatsPerBar;
+      const esAnacrusa = barIndex === 1 && barSum < beatsPerBarUsed;
       issues.push({
         level: 'warn',
         message: esAnacrusa
-          ? `El compás 1 suma ${tidy(barSum)} de ${opts.beatsPerBar} tiempos. Si es una anacrusa (arranque en alzada) está bien; si no, revisalo.`
-          : `El compás ${barIndex} suma ${tidy(barSum)} tiempos y debería sumar ${opts.beatsPerBar}.`,
+          ? `El compás 1 suma ${tidy(barSum)} de ${beatsPerBarUsed} tiempos. Si es una anacrusa (arranque en alzada) está bien; si no, revisalo.`
+          : `El compás ${barIndex} suma ${tidy(barSum)} tiempos y debería sumar ${beatsPerBarUsed}.`,
       });
     }
     barSum = 0;
@@ -335,7 +386,10 @@ export function parseNotation(
     issues.push({ level: 'error', message: 'No encontré ninguna nota ni acorde en el texto.' });
   }
 
-  return { chordEvents, melodyEvents, backingEvents, issues, appliedShift, totalBeats: tidy(t) };
+  return {
+    chordEvents, melodyEvents, backingEvents, issues,
+    appliedShift, totalBeats: tidy(t), suggested, beatsPerBarUsed,
+  };
 }
 
 /** Separa "G#4/.5:u" en sus tres partes. */

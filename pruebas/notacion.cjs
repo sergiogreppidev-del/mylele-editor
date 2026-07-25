@@ -74,6 +74,28 @@ console.log('\n=== Basura ===');
 const r8 = N.parseNotation('C/4 Hola/2 G4/xyz', { target: 'chords', beatsPerBar: 4, knownChords: ['C'] });
 check('avisa de lo que no entiende', r8.issues.filter((i) => i.level === 'error').length >= 2, JSON.stringify(r8.issues.map((i) => i.message)));
 
+console.log('\n=== La IA propone compás y tempo (cabecera) ===');
+// Feliz cumpleaños como la devolvería la IA: ella dice la medida, no se la imponemos.
+const conCabecera = 'BPM: 120\nCOMPAS: 3/4\n| G4/.5 G4/.5 | A4/1 G4/1 C5/1 | B4/2 r/1 |';
+// El nivel está en 4/4 a 80: a propósito distinto, para ver que gana la cabecera.
+const rh = N.parseNotation(conCabecera, { target: 'backing', beatsPerBar: 4, knownChords: [] });
+check('lee el BPM propuesto', rh.suggested.bpm === 120, String(rh.suggested.bpm));
+check('lee el compás propuesto', rh.suggested.timeSig === '3/4', rh.suggested.timeSig);
+check('verifica los compases contra 3/4, no contra el 4/4 del nivel', rh.beatsPerBarUsed === 3, String(rh.beatsPerBarUsed));
+check('la cabecera no se cuela como notas', rh.backingEvents.length === 6, String(rh.backingEvents.length));
+const avisosFalsos = rh.issues.filter((i) => /debería sumar/.test(i.message));
+check('sin avisos falsos de compás', avisosFalsos.length === 0, JSON.stringify(avisosFalsos.map((i) => i.message)));
+
+// Sin cabecera se sigue usando la medida del nivel, como antes.
+const rsc = N.parseNotation('| C/4 | Am/4 |', { target: 'chords', beatsPerBar: 4, knownChords: ['C', 'Am'] });
+check('sin cabecera no propone nada', !rsc.suggested.bpm && !rsc.suggested.timeSig);
+check('sin cabecera usa la medida del nivel', rsc.beatsPerBarUsed === 4);
+
+// Tolerancia a cómo lo escriba la IA: acentos, minúsculas, "Tempo", "=".
+const rtol = N.parseNotation('Tempo = 96\ncompás: 6/8\n| C/6 |', { target: 'chords', beatsPerBar: 4, knownChords: ['C'] });
+check('tolera "Tempo =" y "compás:" en minúscula', rtol.suggested.bpm === 96 && rtol.suggested.timeSig === '6/8',
+  JSON.stringify(rtol.suggested));
+
 console.log('\n=== Ida y vuelta (exportar y volver a leer) ===');
 const texto = N.toNotation(r5.chordEvents, 4);
 console.log('        exportado:', texto);

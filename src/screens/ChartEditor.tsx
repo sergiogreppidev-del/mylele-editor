@@ -5,6 +5,8 @@ import { MelodyGrid } from '../components/MelodyGrid';
 import { ChordPalette } from '../components/ChordPalette';
 import { Issues } from '../components/Issues';
 import { JsonPanel } from '../components/JsonPanel';
+import { Steps } from '../components/Steps';
+import type { Step } from '../components/Steps';
 import { PreviewAudio } from '../lib/previewAudio';
 import type { ChordPcs } from '../lib/previewAudio';
 import { BackingLane } from '../components/BackingLane';
@@ -64,6 +66,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   const [minBars, setMinBars] = useState(4);
   const [defaultDur, setDefaultDur] = useState(4);
 
+  const [paso, setPaso] = useState<'datos' | 'musica' | 'sonido' | 'publicar'>('datos');
   const [uploading, setUploading] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
   const [cursorBeat, setCursorBeat] = useState<number | null>(null);
@@ -89,6 +92,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       setBackingNotes([]);
       setLoaded(null);
       setMode('chords');
+      setPaso('datos');   // un nivel nuevo empieza por la ficha, que está vacía
       return;
     }
     void (async () => {
@@ -105,6 +109,9 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
         setMelody((work?.events ?? []).filter((e): e is MelodyEvent => 'string' in e));
         setBackingNotes(workingChart(row, BACKING_MODE)?.backing ?? []);
         setDirty(false);
+        // Un nivel que ya existe tiene la ficha completa: se entra directo a la
+        // música, que es lo que se viene a tocar el 90% de las veces.
+        setPaso('musica');
       } catch (e) {
         if (alive) setError(friendlyError(e));
       }
@@ -148,6 +155,32 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
     setSong((s) => ({ ...s, ...next }));
     setDirty(true);
   }
+
+  /** "Nivel 5 · Vals de las flores" → "nivel-5-vals-de-las-flores" */
+  function aSlug(txt: string): string {
+    return txt
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '') // saca acentos
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60);
+  }
+
+  /** El identificador se arma solo del título mientras nadie lo haya tocado a mano. */
+  function patchTitulo(title: string) {
+    const autoAntes = aSlug(song.title);
+    const tocadoAMano = song.slug !== '' && song.slug !== autoAntes;
+    patch({ title, ...(tocadoAMano ? {} : { slug: aSlug(title) }) });
+  }
+
+  const PASOS: Step[] = [
+    { id: 'datos', label: 'Datos', problema: hasErrors(songIssues) },
+    { id: 'musica', label: 'Música', problema: hasErrors(chartIssues) },
+    { id: 'sonido', label: 'Sonido', problema: hasErrors(backingIssues) },
+    { id: 'publicar', label: 'Publicar' },
+  ];
+  const pasoIdx = PASOS.findIndex((p) => p.id === paso);
   function setEv(next: ChordEvent[]) {
     setEvents(next);
     setDirty(true);
@@ -443,6 +476,8 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
         {dirty && <span className="badge">Cambios sin guardar</span>}
       </div>
 
+      <Steps steps={PASOS} current={paso} onGo={(p) => setPaso(p as typeof paso)} />
+
       {!canEdit && (
         <div className="notice bad">
           Tu usuario no está habilitado para editar. Podés mirar, pero la base va a rechazar cualquier cambio.
@@ -451,104 +486,139 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       {error && <div className="notice bad">{error}</div>}
       {flash && <div className="notice good">{flash}</div>}
 
-      {/* ---------- datos del nivel ---------- */}
-      <div className="card">
-        <div className="row" style={{ marginBottom: 10 }}>
-          <div className="section-title grow">Datos del nivel</div>
-          {fichaEnBorrador && (
-            <>
-              <span className="badge draft">✎ Sin publicar</span>
-              <CandyButton small tone="ghost" disabled={busy} onClick={() => void handleDiscardFicha()}>
-                Descartar cambios
-              </CandyButton>
-            </>
-          )}
-        </div>
-        {fichaEnBorrador && (
-          <div className="notice warn" style={{ marginBottom: 12 }}>
-            Estos datos están guardados como borrador. Los alumnos siguen viendo{' '}
-            <b>{loaded?.title}</b> a <b>{loaded?.bpm} BPM</b> hasta que publiques.
+      {/* ---------- 1 · DATOS DEL NIVEL ---------- */}
+      {paso === 'datos' ? (
+        <div className="card">
+          <div className="row" style={{ marginBottom: 10 }}>
+            <div className="section-title grow">Datos del nivel</div>
+            {fichaEnBorrador && (
+              <>
+                <span className="badge draft">✎ Sin publicar</span>
+                <CandyButton small tone="ghost" disabled={busy} onClick={() => void handleDiscardFicha()}>
+                  Descartar cambios
+                </CandyButton>
+              </>
+            )}
           </div>
-        )}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
-          <label className="field">
-            <span>Título</span>
-            <input className="f" value={song.title} onChange={(e) => patch({ title: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>Identificador (slug)</span>
-            <input
-              className="f"
-              value={song.slug}
-              placeholder="nivel-5-vals"
-              onChange={(e) => patch({ slug: e.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>Artista</span>
-            <input className="f" value={song.artist ?? ''} onChange={(e) => patch({ artist: e.target.value })} />
-          </label>
-          <label className="field">
-            <span>Nivel</span>
-            <input
-              className="f tnum"
-              type="number"
-              min={1}
-              value={song.level}
-              onChange={(e) => patch({ level: Number(e.target.value) })}
-            />
-          </label>
-          <label className="field">
-            <span>BPM ({BPM_MIN}–{BPM_MAX})</span>
-            <input
-              className="f tnum"
-              type="number"
-              min={BPM_MIN}
-              max={BPM_MAX}
-              value={song.bpm}
-              onChange={(e) => patch({ bpm: Number(e.target.value) })}
-            />
-          </label>
-          <label className="field">
-            <span>Compás</span>
-            <select className="f" value={song.time_sig} onChange={(e) => patch({ time_sig: e.target.value })}>
-              <option value="4/4">4/4</option>
-              <option value="3/4">3/4</option>
-              <option value="2/4">2/4</option>
-              <option value="6/8">6/8</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Modo</span>
-            <select
-              className="f"
-              value={mode}
-              disabled={!!liveChart || !!workChart}
-              onChange={(e) => {
-                setMode(e.target.value as ChartMode);
-                setDirty(true);
-              }}
-            >
-              <option value="chords">Acordes</option>
-              <option value="melody">Notas (tablatura)</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Acceso</span>
-            <div className="row" style={{ height: 40 }}>
+          {fichaEnBorrador && (
+            <div className="notice warn" style={{ marginBottom: 12 }}>
+              Estos datos están guardados como borrador. Los alumnos siguen viendo{' '}
+              <b>{loaded?.title}</b> a <b>{loaded?.bpm} BPM</b> hasta que publiques.
+            </div>
+          )}
+
+          {/* Lo esencial arriba; lo que se toca una vez cada mil, plegado abajo. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+            <label className="field" style={{ gridColumn: '1 / -1' }}>
+              <span>Título</span>
               <input
                 className="f"
-                type="checkbox"
-                checked={song.is_free}
-                onChange={(e) => patch({ is_free: e.target.checked })}
+                value={song.title}
+                placeholder="Nivel 5 · Vals"
+                onChange={(e) => patchTitulo(e.target.value)}
               />
-              <span>{song.is_free ? 'Gratis' : 'Premium'}</span>
-            </div>
-          </label>
-        </div>
-      </div>
+            </label>
+            <label className="field">
+              <span>Qué se practica</span>
+              <select
+                className="f"
+                value={mode}
+                disabled={!!liveChart || !!workChart}
+                onChange={(e) => {
+                  setMode(e.target.value as ChartMode);
+                  setDirty(true);
+                }}
+              >
+                <option value="chords">Acordes</option>
+                <option value="melody">Notas (tablatura)</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Compás</span>
+              <select className="f" value={song.time_sig} onChange={(e) => patch({ time_sig: e.target.value })}>
+                <option value="4/4">4/4</option>
+                <option value="3/4">3/4</option>
+                <option value="2/4">2/4</option>
+                <option value="6/8">6/8</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>BPM ({BPM_MIN}–{BPM_MAX})</span>
+              <input
+                className="f tnum"
+                type="number"
+                min={BPM_MIN}
+                max={BPM_MAX}
+                value={song.bpm}
+                onChange={(e) => patch({ bpm: Number(e.target.value) })}
+              />
+            </label>
+            <label className="field">
+              <span>Orden en el mapa</span>
+              <input
+                className="f tnum"
+                type="number"
+                min={1}
+                value={song.level}
+                onChange={(e) => patch({ level: Number(e.target.value) })}
+              />
+            </label>
+          </div>
 
-      {
+          <p className="muted" style={{ margin: '10px 0 0' }}>
+            Si no sabés el compás ni el tempo de la canción, dejalos como están: en el paso
+            siguiente la IA te los dice y se aplican solos.
+          </p>
+
+          <details className="avanzado" style={{ marginTop: 10 }}>
+            <summary>▸ Más opciones</summary>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+              <label className="field">
+                <span>Identificador (slug)</span>
+                <input
+                  className="f"
+                  value={song.slug}
+                  placeholder="se arma solo del título"
+                  onChange={(e) => patch({ slug: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>Artista</span>
+                <input className="f" value={song.artist ?? ''} onChange={(e) => patch({ artist: e.target.value })} />
+              </label>
+              <label className="field">
+                <span>Acceso</span>
+                <div className="row" style={{ height: 40 }}>
+                  <input
+                    className="f"
+                    type="checkbox"
+                    checked={song.is_free}
+                    onChange={(e) => patch({ is_free: e.target.checked })}
+                  />
+                  <span>{song.is_free ? 'Gratis' : 'Premium'}</span>
+                </div>
+              </label>
+            </div>
+          </details>
+        </div>
+      ) : (
+        // En los demás pasos la ficha se reduce a un renglón: se completa una vez
+        // por nivel y no tiene por qué ocupar la primera pantalla siempre.
+        <div className="resumen">
+          <b>{song.title || 'Nivel sin título'}</b>
+          <span className="dato">{mode === 'melody' ? '🎵 Notas' : '🎸 Acordes'}</span>
+          <span className="dato">{song.time_sig}</span>
+          <span className="dato">{song.bpm} BPM</span>
+          <span className="dato">{song.is_free ? 'Gratis' : 'Premium'}</span>
+          <div className="grow" />
+          <CandyButton small tone="ghost" onClick={() => setPaso('datos')}>
+            Editar datos
+          </CandyButton>
+        </div>
+      )}
+
+      {/* ---------- 2 · MÚSICA ---------- */}
+      {paso === 'musica' && (
         <>
           {/* ---------- paleta ---------- */}
           <div className="card">
@@ -785,7 +855,12 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
               </CandyButton>
             </div>
           </div>
+        </>
+      )}
 
+      {/* ---------- 3 · SONIDO ---------- */}
+      {paso === 'sonido' && (
+        <>
           {/* ---------- fondo ---------- */}
           <div className="card">
             <div className="row" style={{ marginBottom: 10 }}>
@@ -898,22 +973,12 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
             )}
           </div>
 
-          {/* ---------- reproducción de prueba ---------- */}
+          {/* ---------- qué se escucha ---------- */}
           <div className="card">
             <div className="section-title" style={{ marginBottom: 10 }}>
-              Escuchar (sin micrófono — solo para validar que suene y se lea bien)
+              Qué se escucha al reproducir
             </div>
             <div className="row">
-              <CandyButton
-                tone="lime"
-                onClick={() => play()}
-                disabled={playable.length === 0 && backingNotes.length === 0}
-              >
-                ▶ Reproducir
-              </CandyButton>
-              <CandyButton tone="ghost" onClick={stop}>
-                ■ Parar
-              </CandyButton>
               <label className="row" style={{ gap: 6 }}>
                 <input
                   className="f"
@@ -933,7 +998,37 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
             </div>
           </div>
         </>
-      }
+      )}
+
+      {/* ---------- 4 · PUBLICAR ---------- */}
+      {paso === 'publicar' && (
+        <>
+          <div className="card">
+            <div className="section-title" style={{ marginBottom: 10 }}>
+              Antes de publicar
+            </div>
+            {allIssues.length === 0 ? (
+              <div className="notice good">✓ Todo en orden. El nivel está listo para salir en vivo.</div>
+            ) : (
+              <Issues issues={allIssues} />
+            )}
+            <div className="row" style={{ marginTop: 12 }}>
+              <span className="muted grow">
+                {liveChart ? 'Este nivel ya está en vivo. Publicar reemplaza lo que ven los alumnos.' : 'Este nivel todavía no salió: al publicar aparece en el mapa.'}
+              </span>
+              {hasUnpublishedDraft && liveChart && (
+                <CandyButton tone="ghost" small onClick={() => void handleDiscard()} disabled={busy}>
+                  Descartar partitura
+                </CandyButton>
+              )}
+              <CandyButton tone="lime" onClick={() => void persist(true)} disabled={!canEdit || busy || blocked}>
+                🚀 Publicar
+              </CandyButton>
+            </div>
+          </div>
+          <JsonPanel events={playable} backing={backingNotes} />
+        </>
+      )}
 
       {importTarget && (
         <ImportDialog
@@ -951,6 +1046,14 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
             importTarget === 'backing' ? play(playable, b) : play(p, backingNotes)
           }
           onApply={(r) => {
+            // El compás y el tempo que propuso la IA se aplican ANTES que los eventos,
+            // para que la grilla se dibuje con la medida correcta desde el primer cuadro.
+            if (r.setup?.timeSig || r.setup?.bpm) {
+              patch({
+                ...(r.setup.timeSig ? { time_sig: r.setup.timeSig } : {}),
+                ...(r.setup.bpm ? { bpm: r.setup.bpm } : {}),
+              });
+            }
             if (r.chords) setEv(r.chords);
             if (r.melody) setMel(r.melody);
             if (r.backing) applyBacking(r.backing);
@@ -965,30 +1068,49 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
         />
       )}
 
-      <Issues issues={allIssues} />
-      <JsonPanel events={playable} backing={backingNotes} />
+      {/* Los errores del paso actual se ven donde ocurren, no todos juntos al final. */}
+      {paso !== 'publicar' && (
+        <Issues
+          issues={
+            paso === 'datos' ? songIssues : paso === 'musica' ? chartIssues : backingIssues
+          }
+        />
+      )}
 
-      {/* ---------- guardar ---------- */}
-      <div className="card">
-        <div className="row">
-          <CandyButton tone="sun" onClick={() => void persist(false)} disabled={!canEdit || busy || hasErrors(songIssues)}>
-            💾 Guardar borrador
+      {/* ---------- barra fija: siempre a mano, sin scrollear ---------- */}
+      <div className="actionbar">
+        <CandyButton
+          tone="lime"
+          small
+          onClick={() => play()}
+          disabled={playable.length === 0 && backingNotes.length === 0}
+        >
+          ▶ Escuchar
+        </CandyButton>
+        <CandyButton tone="ghost" small onClick={stop}>
+          ■
+        </CandyButton>
+        <CandyButton
+          tone="sun"
+          small
+          onClick={() => void persist(false)}
+          disabled={!canEdit || busy || hasErrors(songIssues)}
+        >
+          💾 Guardar borrador
+        </CandyButton>
+
+        <div className="grow" />
+
+        {pasoIdx > 0 && (
+          <CandyButton tone="ghost" small onClick={() => setPaso(PASOS[pasoIdx - 1].id as typeof paso)}>
+            ← {PASOS[pasoIdx - 1].label}
           </CandyButton>
-          <CandyButton tone="lime" onClick={() => void persist(true)} disabled={!canEdit || busy || blocked}>
-            🚀 Publicar
+        )}
+        {pasoIdx < PASOS.length - 1 && (
+          <CandyButton tone="sky" small onClick={() => setPaso(PASOS[pasoIdx + 1].id as typeof paso)}>
+            {PASOS[pasoIdx + 1].label} →
           </CandyButton>
-          {hasUnpublishedDraft && liveChart && (
-            <CandyButton tone="ghost" onClick={() => void handleDiscard()} disabled={busy}>
-              Descartar borrador
-            </CandyButton>
-          )}
-          <div className="grow" />
-          <span className="muted">
-            {blocked
-              ? 'Publicar está bloqueado hasta resolver los errores.'
-              : 'Publicar deja el nivel en vivo para los alumnos.'}
-          </span>
-        </div>
+        )}
       </div>
     </div>
   );

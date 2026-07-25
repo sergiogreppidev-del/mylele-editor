@@ -3,7 +3,7 @@ import { CandyButton } from './CandyButton';
 import { Issues } from './Issues';
 import { buildAiPrompt, TARGET_LABEL } from '../lib/aiPrompt';
 import { parseNotation, toNotation } from '../lib/notation';
-import type { NotationTarget } from '../lib/notation';
+import type { NotationTarget, SuggestedSetup } from '../lib/notation';
 import { parseBacking, parseEvents, tidy } from '../lib/chartFormat';
 import type { BackingEvent, ChordEvent, Issue, MelodyEvent } from '../lib/chartFormat';
 
@@ -20,7 +20,13 @@ interface Props {
   currentMelody: MelodyEvent[];
   currentBacking: BackingEvent[];
   onPreview: (playable: (ChordEvent | MelodyEvent)[], backing: BackingEvent[]) => void;
-  onApply: (result: { chords?: ChordEvent[]; melody?: MelodyEvent[]; backing?: BackingEvent[] }) => void;
+  onApply: (result: {
+    chords?: ChordEvent[];
+    melody?: MelodyEvent[];
+    backing?: BackingEvent[];
+    /** Compás y tempo que propuso la IA, si el autor eligió aplicarlos. */
+    setup?: { bpm?: number; timeSig?: string };
+  }) => void;
   onClose: () => void;
 }
 
@@ -36,6 +42,9 @@ export function ImportDialog(props: Props) {
   const [pedido, setPedido] = useState('');
   const [mode, setMode] = useState<Mode>('replace');
   const [copied, setCopied] = useState(false);
+  /** false = la IA decide compás y tempo (lo normal). true = los impone el autor. */
+  const [imponerMedida, setImponerMedida] = useState(false);
+  const [aplicarSetup, setAplicarSetup] = useState(true);
 
   /** La capa que se está importando, tal como está ahora. */
   const current: { t: number; dur: number }[] =
@@ -59,16 +68,16 @@ export function ImportDialog(props: Props) {
         if (target === 'backing') {
           const backing = parseBacking(raw);
           if (backing.length === 0) issues.push({ level: 'error', message: 'El JSON no tiene notas de fondo con "pitch".' });
-          return { kind: 'json' as const, chords: [], melody: [], backing, issues, totalBeats: end(backing) };
+          return { kind: 'json' as const, chords: [], melody: [], backing, issues, totalBeats: end(backing), suggested: {} as SuggestedSetup, bpb: beatsPerBar };
         }
         const evs = parseEvents(raw);
         if (evs.length === 0) issues.push({ level: 'error', message: 'El JSON no tiene eventos reconocibles.' });
         const chords = evs.filter((e): e is ChordEvent => 'chord' in e);
         const melody = evs.filter((e): e is MelodyEvent => 'string' in e);
-        return { kind: 'json' as const, chords, melody, backing: [], issues, totalBeats: end(evs) };
+        return { kind: 'json' as const, chords, melody, backing: [], issues, totalBeats: end(evs), suggested: {} as SuggestedSetup, bpb: beatsPerBar };
       } catch {
         return {
-          kind: 'json' as const, chords: [], melody: [], backing: [], totalBeats: 0,
+          kind: 'json' as const, chords: [], melody: [], backing: [], totalBeats: 0, suggested: {} as SuggestedSetup, bpb: beatsPerBar,
           issues: [{ level: 'error' as const, message: 'Eso parece JSON pero está mal escrito (falta una coma o un corchete).' }],
         };
       }
@@ -82,6 +91,8 @@ export function ImportDialog(props: Props) {
       backing: r.backingEvents,
       issues: r.issues,
       totalBeats: r.totalBeats,
+      suggested: r.suggested,
+      bpb: r.beatsPerBarUsed,
     };
   }, [text, target, beatsPerBar, knownChords]);
 
@@ -99,7 +110,7 @@ export function ImportDialog(props: Props) {
   async function copyPrompt() {
     const prompt = buildAiPrompt({
       target, title: props.title, bpm: props.bpm, timeSig: props.timeSig,
-      beatsPerBar, bars, knownChords, pedido,
+      beatsPerBar, bars, knownChords, pedido, imponerMedida,
     });
     try {
       await navigator.clipboard.writeText(prompt);
@@ -140,9 +151,30 @@ export function ImportDialog(props: Props) {
               {copied ? '✓ Copiado' : '📋 Copiar instrucciones'}
             </CandyButton>
           </div>
+          <label className="row" style={{ gap: 7, marginTop: 8 }}>
+            <input
+              className="f"
+              type="checkbox"
+              checked={imponerMedida}
+              onChange={(e) => setImponerMedida(e.target.checked)}
+            />
+            <span>
+              Obligarla a usar <b>{props.timeSig} a {props.bpm} BPM</b> en <b>{bars} compases</b>
+            </span>
+          </label>
           <p className="muted" style={{ margin: '6px 0 0' }}>
-            Copia un pedido con el formato, el compás, el tempo y los acordes de este nivel ya explicados.
-            Lo pegás en Claude o ChatGPT y te devuelve la línea lista para el paso 2.
+            {imponerMedida ? (
+              <>
+                La IA va a meter la música dentro de esa medida. Sirve para ejercicios propios;
+                para una canción conocida suele salir cortada o forzada.
+              </>
+            ) : (
+              <>
+                <b>La IA decide el compás y el tempo</b> que le corresponden a la canción y te los
+                dice — no hace falta que los sepas de antemano. Después el editor te ofrece
+                aplicarlos al nivel con un clic.
+              </>
+            )}
           </p>
         </div>
 
@@ -178,7 +210,41 @@ export function ImportDialog(props: Props) {
             {count > 0 && (
               <div className="notice good" style={{ marginBottom: 8 }}>
                 {count} {target === 'chords' ? 'acordes' : 'notas'} · {tidy(parsed.totalBeats)} tiempos ·{' '}
-                {Math.round((parsed.totalBeats / beatsPerBar) * 10) / 10} compases
+                {Math.round((parsed.totalBeats / parsed.bpb) * 10) / 10} compases
+              </div>
+            )}
+
+            {/* Lo que la IA propuso para el nivel. Acá está la vuelta: el dato que
+                el autor no tenía se lo trae la canción. */}
+            {(parsed.suggested.bpm || parsed.suggested.timeSig) && (
+              <div className="notice" style={{ marginBottom: 8 }}>
+                <div className="row">
+                  <span className="grow">
+                    ✨ La IA dice que esta canción va en{' '}
+                    {parsed.suggested.timeSig && <b>{parsed.suggested.timeSig}</b>}
+                    {parsed.suggested.timeSig && parsed.suggested.bpm && ' a '}
+                    {parsed.suggested.bpm && <b>{parsed.suggested.bpm} BPM</b>}
+                    {' · '}
+                    {Math.ceil(parsed.totalBeats / parsed.bpb)} compases.
+                  </span>
+                </div>
+                <label className="row" style={{ gap: 7, marginTop: 6 }}>
+                  <input
+                    className="f"
+                    type="checkbox"
+                    checked={aplicarSetup}
+                    onChange={(e) => setAplicarSetup(e.target.checked)}
+                  />
+                  <span>
+                    Aplicar al nivel
+                    {(props.timeSig !== parsed.suggested.timeSig || props.bpm !== parsed.suggested.bpm) && (
+                      <span className="muted">
+                        {' '}
+                        (ahora está en {props.timeSig} a {props.bpm} BPM)
+                      </span>
+                    )}
+                  </span>
+                </label>
               </div>
             )}
             <Issues issues={parsed.issues} />
@@ -221,12 +287,13 @@ export function ImportDialog(props: Props) {
             onClick={() => {
               if (!parsed) return;
               const add = mode === 'append';
+              const setup = aplicarSetup ? parsed.suggested : undefined;
               props.onApply(
                 target === 'backing'
-                  ? { backing: add ? [...props.currentBacking, ...shifted.backing] : shifted.backing }
+                  ? { backing: add ? [...props.currentBacking, ...shifted.backing] : shifted.backing, setup }
                   : target === 'chords'
-                    ? { chords: add ? [...props.currentChords, ...shifted.chords] : shifted.chords }
-                    : { melody: add ? [...props.currentMelody, ...shifted.melody] : shifted.melody },
+                    ? { chords: add ? [...props.currentChords, ...shifted.chords] : shifted.chords, setup }
+                    : { melody: add ? [...props.currentMelody, ...shifted.melody] : shifted.melody, setup },
               );
             }}
           >
