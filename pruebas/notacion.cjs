@@ -99,7 +99,11 @@ console.log('\n=== El pedido pide anacrusa y ritmo real ===');
   const pn = P2.buildAiPrompt({ target: 'nivel', title: 'T', bpm: 80, timeSig: '4/4', beatsPerBar: 4,
                                 bars: 8, knownChords: ['C', 'F', 'G'], pedido: 'Feliz cumpleaños', imponerMedida: false });
   check('explica la anacrusa', /ANACRUSA/.test(pn));
-  check('usa Feliz cumpleaños como ejemplo', /Feliz cumplea/.test(pn) && /G4\/\.5 G4\/\.5/.test(pn));
+  check('menciona Feliz cumpleaños al explicar la anacrusa', /Feliz cumplea/.test(pn));
+  // Pero el MINIEJEMPLO no puede ser esa canción. Lo era —arrancaba con las dos
+  // corcheas del "Fe-liz"— y cuando justo se pedía Feliz cumpleaños, el modelo
+  // copiaba el ejemplo y se daba por terminado a los tres compases.
+  check('el miniejemplo NO es la canción del ejemplo', !/MELODIA: \| G4\/\.5 G4\/\.5/.test(pn));
   check('avisa que un compás corrido arruina todo', /corre todo lo que viene después/.test(pn));
   check('pide el ritmo real, no notas iguales', /no todas las notas iguales/.test(pn));
   check('pide las cuatro capas', /MELODIA:/.test(pn) && /BAJO:/.test(pn) && /ACOMP:/.test(pn) && /ACORDES:/.test(pn));
@@ -329,6 +333,76 @@ console.log('\n=== El sub-nivel cambia la densidad de acordes ===');
 /* El pedido de UNA capa se habia quedado atras del pedido de nivel entero: no
    mencionaba la anacrusa, no pedia ritmo real, no avisaba que un compas mal
    sumado corre todo, y el miniejemplo ERA el arranque de Feliz cumpleaños. */
+/* ===================================================================
+   Elegir qué chart se edita.
+
+   Esta parte no tenía NINGUNA prueba, y ahí se escondieron los dos peores
+   errores que tuvimos: agarrar el primer chart de la lista (la app terminó
+   tocando el acompañamiento en vez de los acordes) y preguntar siempre por
+   el sub-nivel 'facil' (el editor mostraba como borrador vacío una canción
+   publicada y en vivo). Reproduzco los dos casos exactos.
+   =================================================================== */
+console.log('\n=== Qué chart se edita (la parte que no estaba cubierta) ===');
+{
+  const K = require('./build/chartPick.js');
+  const ch = (mode, difficulty, version, published) => ({ mode, difficulty, version, published });
+
+  // El caso real de cumpleanos-feliz: acordes publicados en el SEGUNDO sub-nivel.
+  // PostgREST devolvió el fondo primero, que es lo que rompía "el primero de la lista".
+  const feliz = [ch('backing', 'facil', 1, true), ch('chords', 'dificil', 1, true)];
+  check('el fondo no se confunde con lo jugable', K.songMode(feliz) === 'chords');
+  check('encuentra el sub-nivel donde vive la canción', K.songDifficulty(feliz) === 'dificil');
+  check('el chart jugable aparece aunque esté en el otro sub-nivel', !!K.playableChart(feliz));
+  check('y sigue viéndose como publicado', K.playableChart(feliz).published === true);
+  check('preguntar por el sub-nivel equivocado da vacío (por eso no hay que preguntar)',
+    K.workingChart(feliz, 'chords', 'facil') === null);
+  check('preguntar por el correcto sí lo trae', !!K.workingChart(feliz, 'chords', 'dificil'));
+
+  // El orden de la lista no puede decidir nada.
+  const alReves = [ch('chords', 'dificil', 1, true), ch('backing', 'facil', 1, true)];
+  check('el orden de los charts no cambia el resultado',
+    K.songMode(alReves) === K.songMode(feliz) && K.songDifficulty(alReves) === K.songDifficulty(feliz));
+
+  // Un nivel de notas tiene que reconocerse como tal.
+  const notas = [ch('melody', 'facil', 1, true), ch('backing', 'facil', 1, true)];
+  check('un nivel de notas se reconoce', K.songMode(notas) === 'melody');
+  check('un nivel vacío cuenta como de acordes', K.songMode([]) === 'chords');
+  check('un nivel vacío arranca en el primer sub-nivel', K.songDifficulty([]) === 'facil');
+
+  // Entre publicado y borrador, para saber QUÉ ES el nivel gana el publicado.
+  const mezcla = [ch('chords', 'facil', 2, false), ch('chords', 'facil', 1, true)];
+  check('para identificar el nivel gana el publicado', K.playableChart(mezcla).version === 1);
+  // Pero para EDITAR gana el borrador: es lo que se está trabajando.
+  check('para editar gana el borrador', K.workingChart(mezcla, 'chords', 'facil').version === 2);
+  check('lo publicado se encuentra aparte', K.publishedChart(mezcla, 'chords', 'facil').version === 1);
+
+  // Sin publicar, manda la versión más alta y nunca "la primera de la lista".
+  const borradores = [ch('chords', 'facil', 1, false), ch('chords', 'facil', 3, false), ch('chords', 'facil', 2, false)];
+  check('entre borradores gana la versión más alta', K.workingChart(borradores, 'chords', 'facil').version === 3);
+  check('no hay publicado que encontrar', K.publishedChart(borradores, 'chords', 'facil') === null);
+
+  // Versionado: un borrador nuevo va por encima de todo lo que exista.
+  check('la próxima versión es la siguiente a la más alta', K.nextVersion(borradores, 'chords', 'facil') === 4);
+  check('la primera versión de una combinación nueva es 1', K.nextVersion(borradores, 'chords', 'dificil') === 1);
+  check('el versionado no mezcla sub-niveles', K.nextVersion(feliz, 'chords', 'facil') === 1);
+
+  // El fondo es uno solo para los dos sub-niveles: siempre vive en el primero.
+  const conFondo = [ch('backing', 'facil', 1, true)];
+  check('el fondo se encuentra pidiéndolo con cualquier sub-nivel',
+    !!K.workingChart(conFondo, 'backing', 'dificil') && !!K.workingChart(conFondo, 'backing', 'facil'));
+  check('el fondo nunca cuenta como jugable', K.playableChart(conFondo) === null);
+  check('difficultyFor manda el fondo al primer sub-nivel',
+    K.difficultyFor('backing', 'dificil') === 'facil' && K.difficultyFor('chords', 'dificil') === 'dificil');
+
+  // Pisar un borrador existente en vez de crear versiones infinitas.
+  check('se pisa el borrador más nuevo', K.draftToOverwrite(borradores, 'chords', 'facil').version === 3);
+  check('si solo hay publicado, no hay borrador que pisar',
+    K.draftToOverwrite(feliz, 'chords', 'dificil') === null);
+
+  check('difficultiesPresent ignora el fondo',
+    JSON.stringify(K.difficultiesPresent(feliz)) === JSON.stringify(['dificil']));
+}
+
 console.log('\n=== El pedido de notas sueltas (tablatura) ===');
 {
   const mel = P.buildAiPrompt({ target: 'melody', title: 'T', bpm: 100, timeSig: '3/4',
@@ -353,6 +427,30 @@ console.log('\n=== El pedido de notas sueltas (tablatura) ===');
     beatsPerBar: 4, bars: 8, knownChords: [], pedido: 'x', imponerMedida: false });
   check('el fondo también explica la anacrusa', /ANACRUSA:/.test(fondo));
   check('el fondo no se limita al rango del ukelele', /cualquier octava/.test(fondo));
+
+  /* Un nivel completo tiene que respetar el TIPO que eligió el autor. Antes el
+     pedido siempre incluía acordes, la IA siempre los devolvía, y el editor
+     deducía "nivel de acordes": no había forma de crear uno de notas. */
+  const nivelBase = { target: 'nivel', title: 'T', bpm: 90, timeSig: '4/4', beatsPerBar: 4,
+    bars: 8, knownChords: ['C', 'Am', 'F', 'G'], pedido: 'x', imponerMedida: false };
+  const nAc = P.buildAiPrompt({ ...nivelBase, modo: 'chords' });
+  const nNo = P.buildAiPrompt({ ...nivelBase, modo: 'melody' });
+
+  check('nivel de acordes: pide las cuatro capas', /cuatro capas/.test(nAc) && /ACORDES:/.test(nAc));
+  check('nivel de acordes: el juego son los acordes', /ACORDES es EL JUEGO/.test(nAc));
+
+  check('nivel de notas: pide tres capas', /tres capas/.test(nNo));
+  check('nivel de notas: prohíbe el renglón de acordes', /NO escribas un rengl[oó]n ACORDES/.test(nNo));
+  check('nivel de notas: no hay ejemplo de acordes que copiar', !/^ACORDES:/m.test(nNo));
+  check('nivel de notas: el juego es la melodía', /MELODIA es EL JUEGO/.test(nNo));
+  check('nivel de notas: exige el rango del ukelele', /entre\s+C4 y A5/.test(nNo));
+  check('nivel de notas: no le pone límite de acordes por compás', !/ACORDES POR COMP/.test(nNo));
+  check('nivel de notas: el acompañamiento sostiene la armonía', /sostener la armon[ií]a/.test(nNo));
+  check('nivel de notas: la verificación pide cinco renglones', /cinco renglones/.test(nNo));
+  check('sin modo, sigue siendo un nivel de acordes (como antes)',
+    P.buildAiPrompt(nivelBase) === nAc);
+  check('en los dos, la música sigue sin límite',
+    /ninguna limitaci[oó]n de dificultad/.test(nAc) && /ninguna limitaci[oó]n de dificultad/.test(nNo));
 
   // Y los acordes: la anacrusa sí, el "ritmo real" de sílabas no viene al caso.
   const ac = P.buildAiPrompt({ ...base });

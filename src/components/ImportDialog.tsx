@@ -6,7 +6,7 @@ import type { ImportTarget } from '../lib/aiPrompt';
 import { parseNotation, toNotation } from '../lib/notation';
 import type { SuggestedSetup } from '../lib/notation';
 import { DIFICULTADES, ETAPA_ACTUAL, parseBacking, parseEvents, tidy } from '../lib/chartFormat';
-import type { BackingEvent, ChordEvent, Difficulty, Issue, MelodyEvent } from '../lib/chartFormat';
+import type { BackingEvent, ChartMode, ChordEvent, Difficulty, Issue, MelodyEvent } from '../lib/chartFormat';
 import { friendlyError, generarConGemini } from '../lib/supabase';
 
 interface Props {
@@ -17,6 +17,8 @@ interface Props {
   beatsPerBar: number;
   bars: number;
   knownChords: string[];
+  /** Qué toca el alumno en este nivel. Lo eligió el autor y manda sobre lo que devuelva la IA. */
+  modo: ChartMode;
   /** Sub-nivel que se está creando. Se elige ACÁ, antes de pedirle nada a la IA. */
   dificultad: Difficulty;
   onDificultad: (d: Difficulty) => void;
@@ -64,9 +66,12 @@ export function ImportDialog(props: Props) {
    * dos, así que el selector tiene que estar a la vista: si no, se elige solo.
    * El fondo no lleva sub-nivel: siempre se guarda en el mismo.
    */
-  const afectaAlPedido = esNivelCompleto || target === 'chords';
-  const eligeDificultad = afectaAlPedido || target === 'melody';
+  /** En un nivel de notas el sub-nivel todavía no cambia el pedido, solo dónde se guarda. */
+  const afectaAlPedido = target === 'chords' || (esNivelCompleto && props.modo === 'chords');
+  const eligeDificultad = afectaAlPedido || target === 'melody' || esNivelCompleto;
   const difActual = DIFICULTADES.find((d) => d.id === props.dificultad);
+  /** Un nivel de notas no lleva capa de acordes: la armonía va en el acompañamiento. */
+  const nivelPideAcordes = esNivelCompleto && props.modo === 'chords';
 
   /** La capa que se está importando, tal como está ahora. */
   const current: { t: number; dur: number }[] = esNivelCompleto
@@ -153,7 +158,7 @@ export function ImportDialog(props: Props) {
     return buildAiPrompt({
       target, title: props.title, bpm: props.bpm, timeSig: props.timeSig,
       beatsPerBar, bars, knownChords, pedido, imponerMedida, melodiaDelNivel,
-      dificultad: props.dificultad,
+      dificultad: props.dificultad, modo: props.modo,
     });
   }
 
@@ -290,11 +295,20 @@ export function ImportDialog(props: Props) {
           )}
           <p className="muted" style={{ margin: '6px 0 0' }}>
             {esNivelCompleto ? (
-              <>
-                Un solo pedido y la IA escribe <b>el nivel entero</b>: acompañamiento, melodía y
-                acordes, ya alineados entre sí. Los acordes suelen salir mejor así, porque los arma
-                con la melodía que acaba de escribir delante.
-              </>
+              nivelPideAcordes ? (
+                <>
+                  Un solo pedido y la IA escribe <b>el nivel entero</b>: acompañamiento, melodía y
+                  acordes, ya alineados entre sí. Los acordes suelen salir mejor así, porque los arma
+                  con la melodía que acaba de escribir delante. <b>El alumno va a tocar los acordes</b>;
+                  la melodía pasa a sonar de fondo.
+                </>
+              ) : (
+                <>
+                  Un solo pedido y la IA escribe <b>el nivel entero</b>: la melodía que va a tocar el
+                  alumno, más el bajo y el acompañamiento que suenan por debajo. <b>No pide acordes</b>:
+                  en un nivel de notas la armonía la sostiene el acompañamiento.
+                </>
+              )
             ) : imponerMedida ? (
               <>
                 La IA va a meter la música dentro de esa medida. Sirve para ejercicios propios;
@@ -362,20 +376,28 @@ export function ImportDialog(props: Props) {
               </div>
             )}
 
-            {/* Que falte una capa no es un error, pero casi siempre es un descuido. */}
-            {esNivelCompleto && count > 0 && (parsed.backing.length === 0 || parsed.melody.length === 0 || parsed.chords.length === 0) && (
-              <div className="notice warn" style={{ marginBottom: 8 }}>
-                Falta{' '}
-                {[
-                  parsed.backing.length === 0 && 'el fondo',
-                  parsed.melody.length === 0 && 'la melodía',
-                  parsed.chords.length === 0 && 'los acordes',
-                ]
-                  .filter(Boolean)
-                  .join(' y ')}
-                . Fijate que la respuesta tenga los tres renglones: <b>FONDO:</b>, <b>MELODIA:</b> y <b>ACORDES:</b>.
-              </div>
-            )}
+            {/* Que falte una capa no es un error, pero casi siempre es un descuido.
+                En un nivel de notas los acordes NO son una capa que deba llegar. */}
+            {esNivelCompleto && count > 0 && (() => {
+              const faltan = [
+                parsed.backing.length === 0 && 'el acompañamiento',
+                parsed.melody.length === 0 && 'la melodía',
+                nivelPideAcordes && parsed.chords.length === 0 && 'los acordes',
+              ].filter(Boolean) as string[];
+              if (!faltan.length) return null;
+              return (
+                <div className="notice warn" style={{ marginBottom: 8 }}>
+                  Falta {faltan.join(' y ')}. Fijate que la respuesta tenga los renglones{' '}
+                  <b>MELODIA:</b>, <b>BAJO:</b>, <b>ACOMP:</b>
+                  {nivelPideAcordes ? (
+                    <>
+                      {' '}y <b>ACORDES:</b>
+                    </>
+                  ) : null}
+                  .
+                </div>
+              );
+            })()}
 
             {/* Lo que la IA propuso para el nivel. Acá está la vuelta: el dato que
                 el autor no tenía se lo trae la canción. */}

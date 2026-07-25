@@ -22,6 +22,12 @@ const VACIO: ChordRow = {
   pitch_classes: [], weights: [], sort_order: 100,
 };
 
+/** ¿Los pesos guardados difieren de los que saldrían del nombre? Entonces los midió alguien. */
+function calibradoAMano(guardados: number[], delNombre: number[]): boolean {
+  if (guardados.length !== delNombre.length) return false;
+  return guardados.some((w, i) => Math.abs(w - delNombre[i]) > 0.001);
+}
+
 export function ChordsAdmin({ chords, songs, canEdit, onBack, onReload }: Props) {
   const [editing, setEditing] = useState<ChordRow | null>(null);
   /** true = es un acorde nuevo, así el id todavía se puede escribir. */
@@ -79,10 +85,21 @@ export function ChordsAdmin({ chords, songs, canEdit, onBack, onReload }: Props)
     setBusy(true);
     setError(null);
     try {
-      // Las notas y los pesos se recalculan del nombre al guardar, por si el
-      // acorde se escribió después de tocar los trastes.
+      // Las NOTAS se recalculan del nombre, por si el acorde se escribió después de
+      // tocar los trastes. Los PESOS no: solo se generan para un acorde nuevo.
+      //
+      // Los pesos del G están calibrados contra grabaciones reales —exigen su tercera
+      // y bajan el D, lo que llevó la detección de 10 aciertos sobre 39 a 38 sobre 39—
+      // y son distintos de los que sale del nombre. Recalcularlos al guardar borraba
+      // esa medición de un clic, y el síntoma (el C detectándose como G) aparecía
+      // recién cuando alguien tocaba con un ukelele de verdad.
       const p = parseChordName(editing.id)!;
-      await upsertChord({ ...editing, pitch_classes: p.pitchClasses, weights: p.weights });
+      const pesosDesparejos = editing.weights.length !== p.pitchClasses.length;
+      await upsertChord({
+        ...editing,
+        pitch_classes: p.pitchClasses,
+        weights: isNew || pesosDesparejos ? p.weights : editing.weights,
+      });
       await onReload();
       setFlash(`Acorde ${editing.id} guardado. Probalo con el ukelele antes de usarlo en un nivel.`);
       setEditing(null);
@@ -206,6 +223,17 @@ export function ChordsAdmin({ chords, songs, canEdit, onBack, onReload }: Props)
           </div>
 
           <Issues issues={issues} />
+
+          {/* Si los pesos guardados no son los que saldrían del nombre, alguien los
+              midió a mano. Hay que decirlo, porque no se ven en ningún otro lado. */}
+          {!isNew && parsed && calibradoAMano(editing.weights, parsed.weights) && (
+            <div className="notice good">
+              🎚️ Este acorde tiene la detección <b>calibrada a mano</b> con grabaciones reales
+              ({editing.weights.map((w, i) => `${pcName(editing.pitch_classes[i] ?? 0)} ${w}`).join(' · ')}).
+              Guardar <b>no</b> la toca: se respeta tal cual. Para cambiarla hay que volver a medir
+              contra grabaciones, no deducirla del nombre del acorde.
+            </div>
+          )}
 
           <div className="notice warn">
             ⚠️ La detección de un acorde nuevo <b>no está probada</b>. El motor de audio está calibrado con

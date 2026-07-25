@@ -3,6 +3,7 @@
 import { supabase } from './supabase';
 import { BACKING_MODE, parseBacking, parseEvents, serializeBacking, serializeEvents } from './chartFormat';
 import type { AnyChartMode, BackingEvent, ChartEvent, ChartMode, Difficulty, Song } from './chartFormat';
+import * as pick from './chartPick';
 
 export interface ChordRow {
   id: string;
@@ -258,10 +259,9 @@ export async function saveDraft(
     mode === BACKING_MODE
       ? serializeBacking(events as BackingEvent[])
       : serializeEvents(events as ChartEvent[]);
-  // El fondo es el mismo para las dos dificultades, así que vive siempre en 'facil'.
-  const dif: Difficulty = mode === BACKING_MODE ? 'facil' : difficulty;
-  const sameMode = existingCharts.filter((c) => c.mode === mode && c.difficulty === dif);
-  const draft = sameMode.filter((c) => !c.published).sort((a, b) => b.version - a.version)[0];
+  // El fondo es el mismo para los dos sub-niveles, así que vive siempre en el primero.
+  const dif = pick.difficultyFor(mode, difficulty);
+  const draft = pick.draftToOverwrite(existingCharts, mode, difficulty);
 
   if (draft) {
     const { data, error } = await supabase
@@ -271,13 +271,15 @@ export async function saveDraft(
       .select()
       .single();
     if (error) throw error;
-    return { ...(data as ChartRow), events: parseEvents((data as ChartRow).events) };
+    // Pasa por la misma normalización que el alta: si devolviera el jsonb crudo,
+    // el fondo llegaría con los eventos en el campo equivocado y vacío en el suyo.
+    return normalizeChartRow(data);
   }
 
-  const nextVersion = sameMode.reduce((m, c) => Math.max(m, c.version), 0) + 1;
+  const version = pick.nextVersion(existingCharts, mode, difficulty);
   const { data, error } = await supabase
     .from('charts')
-    .insert({ song_id: songId, mode, difficulty: dif, version: nextVersion, events: clean, published: false })
+    .insert({ song_id: songId, mode, difficulty: dif, version, events: clean, published: false })
     .select()
     .single();
   if (error) throw error;
@@ -355,31 +357,35 @@ export async function duplicateSong(source: SongRow): Promise<SongRow> {
   return getSong(created.id);
 }
 
-/* ---------------- Ayudas ---------------- */
+/* ---------------- Ayudas ----------------
+   Son envoltorios finos sobre chartPick, que es donde vive la lógica y donde
+   está cubierta por pruebas. Acá solo se le pasa la lista de charts de la fila. */
 
 /** El chart que está editando el editor: el borrador si existe, si no el publicado. */
-export function workingChart(song: SongRow, mode: AnyChartMode, difficulty: Difficulty = 'facil'): ChartRow | null {
-  const dif = mode === BACKING_MODE ? 'facil' : difficulty;
-  const same = song.charts.filter((c) => c.mode === mode && c.difficulty === dif);
-  const draft = same.filter((c) => !c.published).sort((a, b) => b.version - a.version)[0];
-  return draft ?? same.find((c) => c.published) ?? null;
+export function workingChart(song: SongRow, mode: AnyChartMode, difficulty: Difficulty): ChartRow | null {
+  return pick.workingChart(song.charts, mode, difficulty);
 }
 
-export function publishedChart(song: SongRow, mode: AnyChartMode, difficulty: Difficulty = 'facil'): ChartRow | null {
-  const dif = mode === BACKING_MODE ? 'facil' : difficulty;
-  return song.charts.find((c) => c.mode === mode && c.difficulty === dif && c.published) ?? null;
+export function publishedChart(song: SongRow, mode: AnyChartMode, difficulty: Difficulty): ChartRow | null {
+  return pick.publishedChart(song.charts, mode, difficulty);
+}
+
+/** ¿Es un nivel de acordes o de notas? Ignora la capa de fondo. */
+export function songMode(song: SongRow): ChartMode {
+  return pick.songMode(song.charts);
 }
 
 /**
- * El modo JUGABLE de un nivel. Ojo: hay que ignorar la capa de fondo, porque
- * un nivel puede tener las dos y el fondo no es lo que toca el alumno.
+ * En qué sub-nivel vive esta canción. Una canción vive en UNO solo: el sub-nivel
+ * es la receta con la que se le pidió a la IA, no una variante que se elige después.
+ * Preguntar siempre por 'facil' era lo que hacía desaparecer del listado a las
+ * canciones creadas en el otro.
  */
-export function songMode(song: SongRow): ChartMode {
-  const playable = song.charts.find((c) => c.mode !== BACKING_MODE);
-  return (playable?.mode as ChartMode) ?? 'chords';
+export function songDifficulty(song: SongRow): Difficulty {
+  return pick.songDifficulty(song.charts);
 }
 
-/** ¿Este nivel tiene acompañamiento cargado? */
-export function hasBacking(song: SongRow): boolean {
-  return song.charts.some((c) => c.mode === BACKING_MODE && c.backing.length > 0);
+/** El chart jugable de la canción, sin tener que saber su sub-nivel de antemano. */
+export function playableChart(song: SongRow): ChartRow | null {
+  return pick.playableChart(song.charts);
 }

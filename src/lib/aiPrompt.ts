@@ -7,7 +7,7 @@
    propio tiene sentido imponerle la medida. */
 
 import type { NotationTarget } from './notation';
-import type { Difficulty } from './chartFormat';
+import type { ChartMode, Difficulty } from './chartFormat';
 
 /** 'nivel' genera las tres capas de una sola vez. */
 export type ImportTarget = NotationTarget | 'nivel';
@@ -26,6 +26,12 @@ interface PromptOptions {
    * en los dos, y simplificarla "para que combine" es justamente el error.
    */
   dificultad?: Difficulty;
+  /**
+   * Qué toca el alumno en este nivel: acordes o notas sueltas. Solo aplica al
+   * pedido de nivel completo, y es dato obligatorio para la IA: sin esto no sabe
+   * cuál de las capas es el juego y cuál es la música, y devolvía siempre las dos.
+   */
+  modo?: ChartMode;
   /** Qué canción o idea quiere el autor. Puede ir vacío. */
   pedido?: string;
   /**
@@ -295,15 +301,23 @@ export const TARGET_LABEL: Record<ImportTarget, string> = {
 };
 
 /**
- * Pedido de un NIVEL ENTERO: la IA escribe el acompañamiento, la melodía y los
- * acordes en una sola pasada. La ventaja no es solo ahorrar pasos: al armar los
- * acordes tiene la melodía que acaba de escribir delante, que es exactamente lo
- * que le faltaba cuando los acordes salían despegados de la canción.
+ * Pedido de un NIVEL ENTERO: la IA escribe la música y la capa jugable en una
+ * sola pasada. La ventaja no es solo ahorrar pasos: al armar los acordes tiene
+ * la melodía que acaba de escribir delante, que es exactamente lo que le faltaba
+ * cuando los acordes salían despegados de la canción.
+ *
+ * OJO con `modo`. Antes este pedido siempre incluía el renglón de acordes, y el
+ * editor deducía el tipo de nivel de si habían llegado acordes o no — o sea que
+ * SIEMPRE deducía "acordes" y no había forma de crear un nivel de notas. Ahora
+ * el tipo lo elige el autor antes de pedir nada, y acá se le dice a la IA cuál
+ * de las capas es el juego. En un nivel de notas ni siquiera se piden acordes:
+ * la armonía ya está en el acompañamiento y pedirla de más solo gasta espacio.
  */
 function promptNivelCompleto(o: PromptOptions): string {
   const pedido = o.pedido?.trim();
   const acordes = o.knownChords.join(', ') || '(no hay acordes cargados)';
   const dif: Difficulty = o.dificultad ?? 'facil';
+  const tocaAcordes = (o.modo ?? 'chords') === 'chords';
 
   return [
     'Sos un asistente que escribe niveles para MyLele, una app para aprender ukelele.',
@@ -312,19 +326,32 @@ function promptNivelCompleto(o: PromptOptions): string {
     pedido
       ? `Escribí el nivel completo de: ${pedido}`
       : 'Escribí un nivel completo con una canción sencilla y reconocible.',
-    'Son cuatro capas de la misma canción, alineadas entre sí:',
+    tocaAcordes
+      ? 'Son cuatro capas de la misma canción, alineadas entre sí:'
+      : 'Son tres capas de la misma canción, alineadas entre sí:',
     '  MELODIA — la melodía de la canción. Una nota por vez.',
     '  BAJO    — la línea de bajo.',
     '  ACOMP   — el relleno armónico: arpegios, contracantos, acordes.',
-    '  ACORDES — los acordes que rasguea el alumno.',
+    ...(tocaAcordes ? ['  ACORDES — los acordes que rasguea el alumno.'] : []),
     '',
     'SEPARÁ DOS COSAS QUE NO SON LO MISMO',
-    'MELODIA + BAJO + ACOMP son LA MÚSICA, la que reproduce la app. Tiene que sonar a un arreglo',
-    'de verdad: rica, con movimiento y entretenida. NO tiene ninguna limitación de dificultad.',
-    'ACORDES es EL JUEGO, lo único que toca el alumno. Eso sí tiene que ser simple.',
-    'No simplifiques la música para que combine con el juego: son cosas distintas.',
-    'Más abajo hay un límite de cuántos acordes por compás. Ese límite es SOLO para la capa',
-    'ACORDES. MELODIA, BAJO y ACOMP no se tocan: la canción es la misma y suena igual de rica.',
+    ...(tocaAcordes
+      ? [
+          'MELODIA + BAJO + ACOMP son LA MÚSICA, la que reproduce la app. Tiene que sonar a un arreglo',
+          'de verdad: rica, con movimiento y entretenida. NO tiene ninguna limitación de dificultad.',
+          'ACORDES es EL JUEGO, lo único que toca el alumno. Eso sí tiene que ser simple.',
+          'No simplifiques la música para que combine con el juego: son cosas distintas.',
+          'Más abajo hay un límite de cuántos acordes por compás. Ese límite es SOLO para la capa',
+          'ACORDES. MELODIA, BAJO y ACOMP no se tocan: la canción es la misma y suena igual de rica.',
+        ]
+      : [
+          'ESTE ES UN NIVEL DE NOTAS SUELTAS: el alumno toca LA MELODIA, nota por nota, en el mástil.',
+          'BAJO + ACOMP son LA MÚSICA que reproduce la app por debajo. Tienen que sonar a un arreglo',
+          'de verdad: ricos, con movimiento. NO tienen ninguna limitación de dificultad.',
+          'MELODIA es EL JUEGO. No la simplifiques por eso —la melodía ES la canción y recortarla la',
+          'vuelve irreconocible—, pero sí tiene que entrar entera en el ukelele.',
+          'NO escribas un renglón ACORDES: en este nivel no se usa. La armonía va en ACOMP.',
+        ]),
     '',
     'CÓMO QUE SEA UN ARREGLO Y NO UN METRÓNOMO CON ALTURAS',
     '- El error típico es poner el bajo en el tiempo 1 y el mismo bloque de acordes en los demás,',
@@ -345,18 +372,38 @@ function promptNivelCompleto(o: PromptOptions): string {
     ...RITMO_COMPASES,
     '',
     'REGLAS',
-    '- Las CUATRO capas tienen que durar LO MISMO y estar alineadas: el acorde del compás 3 tiene',
-    '  que corresponder a lo que suena en el compás 3 de la melodía. Si hay anacrusa, las cuatro',
+    tocaAcordes
+      ? '- Las CUATRO capas tienen que durar LO MISMO y estar alineadas: el acorde del compás 3 tiene'
+      : '- Las TRES capas tienen que durar LO MISMO y estar alineadas: lo que suena en el compás 3',
+    tocaAcordes
+      ? '  que corresponder a lo que suena en el compás 3 de la melodía. Si hay anacrusa, las cuatro'
+      : '  del acompañamiento tiene que corresponder al compás 3 de la melodía. Si hay anacrusa, las',
     '  capas la comparten.',
-    `- ACORDES: usá únicamente estos: ${acordes}. Si la canción pide otro, poné el más parecido`,
-    '  (G7 -> G, Dm -> Am). Cuántos entran por compás está en la sección siguiente.',
-    '- MELODIA: notas entre C4 y A5 (el rango del ukelele), una sola por vez.',
+    ...(tocaAcordes
+      ? [
+          `- ACORDES: usá únicamente estos: ${acordes}. Si la canción pide otro, poné el más parecido`,
+          '  (G7 -> G, Dm -> Am). Cuántos entran por compás está en la sección siguiente.',
+          '- MELODIA: notas entre C4 y A5 (el rango del ukelele), una sola por vez.',
+        ]
+      : [
+          '- MELODIA: esto es lo que TOCA EL ALUMNO, así que TODAS las notas tienen que estar entre',
+          '  C4 y A5, que es lo que se puede tocar en un ukelele de 12 trastes. Si la melodía original',
+          '  es más grave o más aguda, subila o bajala de octava entera para que entre.',
+          '- MELODIA: una sola nota por vez. Nunca corchetes acá: el alumno tiene un solo dedo por nota.',
+        ]),
     '- BAJO: registro grave, C2 a C4. Una nota por vez.',
     '- ACOMP: registro medio, C3 a C6. Para que suenen varias notas juntas se escriben entre',
     '  corchetes: "[C3,E3,G3]/2". Podés mezclar notas sueltas y corchetes en el mismo renglón.',
-    '',
-    ...reglasDensidad(dif),
-    'Repito porque es el error más común: esto limita SOLO el renglón ACORDES.',
+    ...(tocaAcordes
+      ? [
+          '',
+          ...reglasDensidad(dif),
+          'Repito porque es el error más común: esto limita SOLO el renglón ACORDES.',
+        ]
+      : [
+          '- ACOMP tiene que sostener la armonía de la canción, porque acá no hay renglón de acordes:',
+          '  es lo único que le da contexto armónico a la melodía que toca el alumno.',
+        ]),
     '',
     'FORMATO DE SALIDA',
     'Los tiempos se miden en TIEMPOS (beats): 1 = negra, .5 = corchea, 2 = blanca, 1.5 = con puntillo.',
@@ -368,10 +415,10 @@ function promptNivelCompleto(o: PromptOptions): string {
     'bajo se mueve en vez de repetir la fundamental y el acompañamiento arpegia.',
     'BPM: 120',
     'COMPAS: 3/4',
-    'MELODIA: | G4/.5 G4/.5 | A4/1 G4/1 C5/1 | B4/2 r/1 |',
-    'BAJO: | r/1 | C2/1 G2/1 E2/1 | G2/2 G2/1 |',
-    'ACOMP: | r/1 | r/1 [E3,G3]/1 [C4,E4]/1 | [D3,G3]/2 r/1 |',
-    'ACORDES: | r/1 | C/3 | G/3 |',
+    'MELODIA: | D4/1 | F4/1 A4/1.5 G4/.5 | E4/2 r/1 |',
+    'BAJO: | r/1 | D2/1 A2/1 F2/1 | C3/2 C3/1 |',
+    'ACOMP: | r/1 | r/1 [F3,A3]/1 [D4,F4]/1 | [E3,G3]/2 r/1 |',
+    ...(tocaAcordes ? ['ACORDES: | r/1 | F/3 | C/3 |'] : []),
     '',
     'ESCRIBÍ LA CANCIÓN ENTERA',
     'Ese miniejemplo tiene 3 compases porque muestra la forma, no porque las canciones duren eso.',
@@ -383,14 +430,25 @@ function promptNivelCompleto(o: PromptOptions): string {
     '- No pidas confirmación ni ofrezcas continuar después: entregá la canción terminada.',
     '',
     'ANTES DE RESPONDER, VERIFICÁ (y corregí si hace falta)',
-    '1. ¿Están los seis renglones? BPM, COMPAS, MELODIA, BAJO, ACOMP y ACORDES.',
-    '2. ¿Las cuatro capas tienen la MISMA cantidad de compases y suman los mismos tiempos?',
+    tocaAcordes
+      ? '1. ¿Están los seis renglones? BPM, COMPAS, MELODIA, BAJO, ACOMP y ACORDES.'
+      : '1. ¿Están los cinco renglones? BPM, COMPAS, MELODIA, BAJO y ACOMP. (ACORDES no va.)',
+    tocaAcordes
+      ? '2. ¿Las cuatro capas tienen la MISMA cantidad de compases y suman los mismos tiempos?'
+      : '2. ¿Las tres capas tienen la MISMA cantidad de compases y suman los mismos tiempos?',
     '3. ¿Cada compás suma exactamente los tiempos del compás, salvo el primero y el último?',
     '4. ¿Está la canción completa, sin abreviar ninguna repetición?',
-    dif === 'facil'
-      ? '5. En ACORDES, ¿hay UN SOLO acorde en cada compás, ocupando el compás entero?'
-      : '5. En ACORDES, ¿ningún compás tiene más de DOS acordes, y los partidos son distintos entre sí?',
-    '6. ¿MELODIA, BAJO y ACOMP quedaron ricos, sin haberlos simplificado por el límite de acordes?',
+    ...(tocaAcordes
+      ? [
+          dif === 'facil'
+            ? '5. En ACORDES, ¿hay UN SOLO acorde en cada compás, ocupando el compás entero?'
+            : '5. En ACORDES, ¿ningún compás tiene más de DOS acordes, y los partidos son distintos entre sí?',
+          '6. ¿MELODIA, BAJO y ACOMP quedaron ricos, sin haberlos simplificado por el límite de acordes?',
+        ]
+      : [
+          '5. En MELODIA, ¿TODAS las notas están entre C4 y A5? Es lo que el alumno puede tocar.',
+          '6. ¿BAJO y ACOMP quedaron ricos, y ACOMP sostiene la armonía sin renglón de acordes?',
+        ]),
     '',
     'RESPUESTA',
     'Devolvé solamente esos seis renglones, sin explicaciones, sin comentarios y sin bloque de',

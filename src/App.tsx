@@ -9,7 +9,13 @@ import { LevelList } from './screens/LevelList';
 import { ChartEditor } from './screens/ChartEditor';
 import { ChordsAdmin } from './screens/ChordsAdmin';
 
-type Route = { name: 'list' } | { name: 'editor'; songId: string | null } | { name: 'chords' };
+import type { ChartMode } from './lib/chartFormat';
+
+/** Al crear, el tipo viaja en la ruta: se eligió en el listado y ya no se discute. */
+type Route =
+  | { name: 'list' }
+  | { name: 'editor'; songId: string | null; nuevoModo?: ChartMode }
+  | { name: 'chords' };
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -90,13 +96,16 @@ export default function App() {
           <LevelList
             songs={songs}
             canEdit={isAdmin}
-            onOpen={(songId) => setRoute({ name: 'editor', songId })}
+            onOpen={(songId, nuevoModo) => setRoute({ name: 'editor', songId, nuevoModo })}
             onReload={reload}
           />
         ) : (
           <ChartEditor
-            key={route.songId ?? 'nuevo'}
+            // El modo entra en la clave: entrar a crear un nivel de notas y después
+            // uno de acordes tiene que remontar el editor, no reusar el estado viejo.
+            key={route.songId ?? `nuevo-${route.nuevoModo ?? 'chords'}`}
             songId={route.songId}
+            nuevoModo={route.nuevoModo}
             chords={chords}
             canEdit={isAdmin}
             onBack={() => setRoute({ name: 'list' })}

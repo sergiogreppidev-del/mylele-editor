@@ -24,13 +24,15 @@ import type {
 import {
   EMPTY_SONG, backingUrl, deleteBacking, discardDraft, discardSongDraft, effectiveSong,
   getSong, hasSongDraft, insertSong, publishChart, publishSongMeta, publishedChart,
-  saveDraft, saveSongDraft, songMode, uploadBacking, workingChart,
+  saveDraft, saveSongDraft, songDifficulty, songMode, uploadBacking, workingChart,
 } from '../lib/db';
 import type { ChartRow, ChordRow, SongRow } from '../lib/db';
 import { friendlyError } from '../lib/supabase';
 
 interface Props {
   songId: string | null;
+  /** Tipo elegido en el listado al crear. Para un nivel que ya existe, se ignora. */
+  nuevoModo?: ChartMode;
   chords: ChordRow[];
   canEdit: boolean;
   onBack: () => void;
@@ -49,11 +51,11 @@ const PATTERNS: { value: StrumPattern; label: string }[] = [
   { value: 'island', label: 'Island D–DU–UDU' },
 ];
 
-export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props) {
+export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onReload }: Props) {
   const [song, setSong] = useState<Song>({ ...EMPTY_SONG });
   const [id, setId] = useState<string | null>(songId);
   const [loaded, setLoaded] = useState<SongRow | null>(null);
-  const [mode, setMode] = useState<ChartMode>('chords');
+  const [mode, setMode] = useState<ChartMode>(nuevoModo ?? 'chords');
   const [events, setEvents] = useState<ChordEvent[]>([]);
   const [melody, setMelody] = useState<MelodyEvent[]>([]);
   const [backingNotes, setBackingNotes] = useState<BackingEvent[]>([]);
@@ -85,6 +87,20 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   if (!audio.current) audio.current = new PreviewAudio();
   useEffect(() => () => audio.current?.stop(), []);
 
+  /**
+   * Vuelca a la pantalla las capas de una fila YA TRAÍDA. Sin red.
+   * Cambiar de sub-nivel no necesita volver a consultar la base: la fila ya trae
+   * todos los charts de la canción.
+   */
+  function cargarCapas(row: SongRow, m: ChartMode, d: Difficulty) {
+    const work = workingChart(row, m, d);
+    setEvents((work?.events ?? []).filter((e): e is ChordEvent => 'chord' in e));
+    setMelody((work?.events ?? []).filter((e): e is MelodyEvent => 'string' in e));
+    setBackingNotes(workingChart(row, BACKING_MODE, 'facil')?.backing ?? []);
+    setSelected(null);
+    setDirty(false);
+  }
+
   /* ---------- carga ---------- */
   useEffect(() => {
     let alive = true;
@@ -94,7 +110,10 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       setMelody([]);
       setBackingNotes([]);
       setLoaded(null);
-      setMode('chords');
+      // El tipo lo eligió el autor en el listado. Es la única fuente: deducirlo
+      // después de lo que devuelva la IA era lo que impedía crear niveles de notas.
+      setMode(nuevoModo ?? 'chords');
+      setDificultad('facil');
       setPaso('datos');   // un nivel nuevo empieza por la ficha, que está vacía
       return;
     }
@@ -102,16 +121,16 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       try {
         const row = await getSong(songId);
         if (!alive) return;
+        // El tipo y el sub-nivel salen de lo que la canción TIENE. Abrir siempre en
+        // el sub-nivel 1 mostraba la grilla vacía si la canción vivía en el otro.
         const m = songMode(row);
-        const work = workingChart(row, m, dificultad);
+        const d = songDifficulty(row);
         setLoaded(row);
         setId(row.id);
         setMode(m);
+        setDificultad(d);
         setSong(effectiveSong(row));   // lo publicado con el borrador de la ficha encima
-        setEvents((work?.events ?? []).filter((e): e is ChordEvent => 'chord' in e));
-        setMelody((work?.events ?? []).filter((e): e is MelodyEvent => 'string' in e));
-        setBackingNotes(workingChart(row, BACKING_MODE)?.backing ?? []);
-        setDirty(false);
+        cargarCapas(row, m, d);
         // Un nivel que ya existe tiene la ficha completa: se entra directo a la
         // música, que es lo que se viene a tocar el 90% de las veces.
         setPaso('musica');
@@ -122,7 +141,8 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
     return () => {
       alive = false;
     };
-  }, [songId, dificultad]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [songId, nuevoModo]);
 
   const bpb = beatsPerBar(song.time_sig);
   /** Lo que toca el alumno, sea acordes o notas. */
@@ -163,16 +183,27 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
     setDirty(true);
   }
 
-  /**
-   * Cambiar de sub-nivel recarga el chart desde la base (el efecto de arriba depende
-   * de `dificultad`), así que lo que no esté guardado se pierde. Por eso se avisa.
-   */
+  /** Cambiar de sub-nivel vuelve a leer las capas de la fila, así que se avisa. */
   function cambiarDificultad(d: Difficulty) {
     if (d === dificultad) return;
     if (dirty && !window.confirm('Tenés cambios sin guardar. ¿Cambiar de sub-nivel igual?')) return;
     setDificultad(d);
-    setSelected(null);
+    if (loaded) cargarCapas(loaded, mode, d);
   }
+
+  /** ¿Se puede salir? Media hora de trabajo no se tira sin preguntar. */
+  function salir() {
+    if (dirty && !window.confirm('Tenés cambios sin guardar. Si salís, se pierden. ¿Salir igual?')) return;
+    onBack();
+  }
+
+  // Cerrar la pestaña es la otra puerta por la que se perdía todo sin aviso.
+  useEffect(() => {
+    if (!dirty) return;
+    const avisar = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', avisar);
+    return () => window.removeEventListener('beforeunload', avisar);
+  }, [dirty]);
 
   /** "Nivel 5 · Vals de las flores" → "nivel-5-vals-de-las-flores" */
   function aSlug(txt: string): string {
@@ -466,11 +497,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       await discardDraft(workChart.id);
       const fresh = await getSong(id!);
       setLoaded(fresh);
-      const work = workingChart(fresh, mode, dificultad);
-      setEvents((work?.events ?? []).filter((e): e is ChordEvent => 'chord' in e));
-      setMelody((work?.events ?? []).filter((e): e is MelodyEvent => 'string' in e));
-      setBackingNotes(workingChart(fresh, BACKING_MODE)?.backing ?? []);
-      setDirty(false);
+      cargarCapas(fresh, mode, dificultad);
       setFlash('Borrador descartado.');
       await onReload();
     } catch (e) {
@@ -486,7 +513,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   return (
     <div className="stack-16">
       <div className="row">
-        <CandyButton tone="ghost" small onClick={onBack}>
+        <CandyButton tone="ghost" small onClick={salir}>
           ← Volver
         </CandyButton>
         <h2 style={{ fontSize: 22 }}>{id ? song.title || 'Nivel sin título' : 'Nivel nuevo'}</h2>
@@ -1133,6 +1160,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
           beatsPerBar={bpb}
           bars={bars}
           knownChords={chords.map((c) => c.id)}
+          modo={mode}
           dificultad={dificultad}
           onDificultad={cambiarDificultad}
           currentChords={events}
@@ -1154,22 +1182,29 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
               });
             }
             if (importTarget === 'nivel') {
-              // Un nivel completo puede traer melodía Y acordes. El alumno toca una
-              // sola de las dos, así que la otra pasa a ser parte de lo que ESCUCHA:
-              // si no, la melodía se perdía al guardar sin que nadie se enterara.
-              const tocaAcordes = !!r.chords?.length;
-              const melodiaComoFondo: BackingEvent[] = tocaAcordes
-                ? (r.melody ?? []).map((n) => ({
-                    t: n.t,
-                    pitch: midiToPitch(STRING_MIDI[n.string] + n.fret),
-                    dur: n.dur,
-                    v: 'lead' as const, // es la melodía: tiene que destacarse
-                  }))
-                : [];
-              setMode(tocaAcordes ? 'chords' : 'melody');
-              setEv(r.chords ?? []);
-              setMel(tocaAcordes ? [] : (r.melody ?? []));
-              applyBacking([...(r.backing ?? []), ...melodiaComoFondo]);
+              // EL TIPO DE NIVEL NO SE DEDUCE DE LO QUE DEVUELVA LA IA. Antes sí, y
+              // como el pedido siempre incluía acordes, siempre salía un nivel de
+              // acordes: no había forma de crear uno de notas. Ahora lo elegiste vos
+              // en el listado y acá solo se reparte lo que llegó según esa decisión.
+              if (mode === 'chords') {
+                setEv(r.chords ?? []);
+                setMel([]);
+                // La melodía no se toca en este nivel pero tiene que SONAR: va al
+                // fondo marcada como 'lead' para destacarse sobre el relleno.
+                const melodiaComoFondo: BackingEvent[] = (r.melody ?? []).map((n) => ({
+                  t: n.t,
+                  pitch: midiToPitch(STRING_MIDI[n.string] + n.fret),
+                  dur: n.dur,
+                  v: 'lead' as const,
+                }));
+                applyBacking([...(r.backing ?? []), ...melodiaComoFondo]);
+              } else {
+                // Nivel de notas: la melodía es lo jugable. Si la IA mandó acordes
+                // igual, se descartan — la armonía ya la sostiene el acompañamiento.
+                setMel(r.melody ?? []);
+                setEv([]);
+                applyBacking(r.backing ?? []);
+              }
             } else {
               if (r.chords) setEv(r.chords);
               if (r.melody) setMel(r.melody);
