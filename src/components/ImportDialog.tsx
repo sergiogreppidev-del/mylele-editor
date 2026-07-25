@@ -25,8 +25,8 @@ interface Props {
     chords?: ChordEvent[];
     melody?: MelodyEvent[];
     backing?: BackingEvent[];
-    /** Compás y tempo que propuso la IA, si el autor eligió aplicarlos. */
-    setup?: { bpm?: number; timeSig?: string };
+    /** Compás, tempo y anacrusa que propuso la IA, si el autor eligió aplicarlos. */
+    setup?: SuggestedSetup;
   }) => void;
   onClose: () => void;
 }

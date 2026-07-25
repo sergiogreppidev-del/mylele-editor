@@ -140,6 +140,8 @@ export type NotationTarget = 'chords' | 'melody' | 'backing';
 export interface SuggestedSetup {
   bpm?: number;
   timeSig?: string;
+  /** Tiempos antes del primer compás completo, deducidos del primer compás corto. */
+  pickup?: number;
 }
 
 export interface ParsedNotation {
@@ -310,6 +312,8 @@ export function parseNotation(text: string, opts: ParseOptions): ParsedNotation 
       issues: [...acc.issues, ...r.issues.map((i) => ({ ...i, message: etiqueta + i.message }))],
       appliedShift: r.appliedShift || acc.appliedShift,
       totalBeats: Math.max(acc.totalBeats, r.totalBeats),
+      // Todas las capas comparten la anacrusa: alcanza con que una la declare.
+      suggested: { ...acc.suggested, ...(r.suggested.pickup ? { pickup: r.suggested.pickup } : {}) },
     };
   }, vacio);
 }
@@ -347,6 +351,7 @@ function parseLayer(
   // Los compases se juzgan al final, cuando ya se sabe cuál es el último: solo el
   // primero (anacrusa) y el último (final incompleto) pueden quedar cortos.
   const barSums: number[] = [];
+  let pickupDetectado = 0;
   const closeBar = () => {
     if (!seenAnyToken) return; // un "|" al principio no abre compás
     if (barSum === 0) return; // "|" al final o dos seguidas: no es un compás vacío
@@ -420,9 +425,12 @@ function parseLayer(
     const corto = sum < beatsPerBarUsed;
 
     if (corto && esPrimero) {
+      // El primer compás corto ES la anacrusa: se guarda para que las barras y el
+      // acento del metrónomo caigan donde corresponde en vez de cada N desde cero.
+      pickupDetectado = tidy(sum);
       issues.push({
         level: 'warn',
-        message: `El compás 1 suma ${tidy(sum)} de ${beatsPerBarUsed} tiempos. Si es una anacrusa (arranque en alzada) está bien; si no, revisalo.`,
+        message: `Arranca con una anacrusa de ${tidy(sum)} de ${beatsPerBarUsed} tiempos (el primer tiempo fuerte cae después). Si no era la intención, revisá el primer compás.`,
       });
     } else if (corto && esUltimo) {
       issues.push({
@@ -526,7 +534,9 @@ function parseLayer(
 
   return {
     chordEvents, melodyEvents, backingEvents, issues,
-    appliedShift, totalBeats: tidy(t), suggested, beatsPerBarUsed,
+    appliedShift, totalBeats: tidy(t),
+    suggested: pickupDetectado > 0 ? { pickup: pickupDetectado } : {},
+    beatsPerBarUsed,
   };
 }
 

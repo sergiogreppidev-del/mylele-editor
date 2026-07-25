@@ -74,6 +74,11 @@ export interface Song {
   audio_path: string | null;
   /** Corrimiento en segundos para calzar la grabación con el tiempo 1. Puede ser negativo. */
   audio_offset_s: number;
+  /**
+   * Anacrusa: tiempos que suenan antes del primer compás completo. Los compases
+   * empiezan en `pickup_beats + k * tiemposPorCompás`, no cada N desde cero.
+   */
+  pickup_beats: number;
   is_free: boolean;
   duration_s: number | null;
 }
@@ -104,9 +109,22 @@ export function chartLengthBeats(events: Timed[]): number {
 }
 
 /** Cantidad de compases a dibujar: los que ocupa el chart, con un mínimo. */
-export function barCount(events: Timed[], timeSig: string, minBars = 4): number {
+export function barCount(events: Timed[], timeSig: string, minBars = 4, pickup = 0): number {
   const bpb = beatsPerBar(timeSig);
-  return Math.max(minBars, Math.ceil(chartLengthBeats(events) / bpb) || minBars);
+  const largo = Math.max(0, chartLengthBeats(events) - pickup);
+  return Math.max(minBars, Math.ceil(largo / bpb) || minBars) + (pickup > 0 ? 1 : 0);
+}
+
+/**
+ * Dónde cae cada barra de compás, en tiempos. Con anacrusa, el primer compás es
+ * corto y los siguientes arrancan corridos: dibujarlas cada N desde cero hace que
+ * todo se vea desfasado aunque el chart esté perfecto.
+ */
+export function barLines(totalBeats: number, timeSig: string, pickup = 0): number[] {
+  const bpb = beatsPerBar(timeSig);
+  const out: number[] = [];
+  for (let b = pickup > 0 ? pickup : bpb; b < totalBeats - 0.001; b += bpb) out.push(tidy(b));
+  return out;
 }
 
 /** Redondeo a la subdivisión elegida (1 = negra, 0.5 = corchea, 0.25 = semicorchea). */

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { beatsPerBar, snap, tidy } from '../lib/chartFormat';
+import { barLines, beatsPerBar, snap, tidy } from '../lib/chartFormat';
 import type { ChordEvent } from '../lib/chartFormat';
 import { chordColor } from '../lib/colors';
 
@@ -17,6 +17,8 @@ interface Props {
   selected: number | null;
   /** beat del cursor de reproducción; null cuando está parado */
   cursorBeat: number | null;
+  /** Anacrusa en tiempos: corre las barras de compás. */
+  pickup: number;
   onSelect: (index: number | null) => void;
   onChange: (events: ChordEvent[]) => void;
 }
@@ -32,11 +34,12 @@ type Drag =
  */
 export function BeatGrid({
   events, timeSig, step, pxPerBeat, bars, defaultDur, brush,
-  selected, cursorBeat, onSelect, onChange,
+  selected, cursorBeat, pickup, onSelect, onChange,
 }: Props) {
   const bpb = beatsPerBar(timeSig);
-  const totalBeats = bars * bpb;
+  const totalBeats = pickup + bars * bpb;
   const width = totalBeats * pxPerBeat;
+  const barras = barLines(totalBeats, timeSig, pickup);
 
   const laneRef = useRef<HTMLDivElement>(null);
   const [hoverBeat, setHoverBeat] = useState<number | null>(null);
@@ -106,14 +109,11 @@ export function BeatGrid({
   }
 
   /* --- líneas de compás y de tiempo --- */
+  const esBarra = (b: number) => barras.some((x) => Math.abs(x - b) < 0.001);
   const lines = [];
   for (let b = 1; b < totalBeats; b++) {
     lines.push(
-      <div
-        key={b}
-        className={'beat-line' + (b % bpb === 0 ? ' bar' : '')}
-        style={{ left: b * pxPerBeat }}
-      />,
+      <div key={b} className={'beat-line' + (esBarra(b) ? ' bar' : '')} style={{ left: b * pxPerBeat }} />,
     );
   }
 
@@ -130,6 +130,12 @@ export function BeatGrid({
     <div className="grid-wrap">
       <div className="grid-scroll" style={{ width }}>
         <div className="bar-ruler">
+          {/* Con anacrusa, el primer bloque es más angosto y se rotula como tal. */}
+          {pickup > 0 && (
+            <div className="bar" style={{ width: pickup * pxPerBeat }}>
+              alzada
+            </div>
+          )}
           {Array.from({ length: bars }, (_, i) => (
             <div key={i} className="bar" style={{ width: bpb * pxPerBeat }}>
               compás {i + 1}

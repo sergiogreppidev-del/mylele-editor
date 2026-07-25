@@ -55,6 +55,7 @@ export const EMPTY_SONG: Song = {
   tuning: 'GCEA',
   audio_path: null,
   audio_offset_s: 0,
+  pickup_beats: 0,
   is_free: true,
   duration_s: null,
 };
@@ -158,6 +159,7 @@ function normalizeSongRow(raw: unknown): SongRow {
     ...r,
     bpm: Number(r.bpm),
     audio_offset_s: Number(r.audio_offset_s) || 0,
+    pickup_beats: Number(r.pickup_beats) || 0,
     draft: r.draft ?? null,
     charts: (r.charts ?? []).map((c) => ({
       ...c,
@@ -229,6 +231,7 @@ function stripSong(s: Song) {
     tuning: s.tuning,
     audio_path: s.audio_path || null,
     audio_offset_s: Number(s.audio_offset_s) || 0,
+    pickup_beats: Number(s.pickup_beats) || 0,
     is_free: s.is_free,
     duration_s: s.duration_s,
   };

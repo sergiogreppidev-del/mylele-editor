@@ -1,4 +1,4 @@
-import { beatsPerBar } from '../lib/chartFormat';
+import { barLines, beatsPerBar } from '../lib/chartFormat';
 import type { BackingEvent, ChordEvent, MelodyEvent } from '../lib/chartFormat';
 import { MAX_PLAYABLE_MIDI, MIN_PLAYABLE_MIDI, STRING_MIDI, pitchToMidi } from '../lib/notation';
 import { chordColor } from '../lib/colors';
@@ -12,6 +12,7 @@ interface Props {
   pxPerBeat: number;
   bars: number;
   cursorBeat: number | null;
+  pickup: number;
 }
 
 const H_ACORDES = 30;
@@ -25,20 +26,32 @@ const H_FONDO = 52;
  * no calza con la melodía en el compás 7 no lo es. Esta vista existe para que
  * ese desfasaje se vea de un vistazo en vez de tener que escuchar todo.
  */
-export function LevelOverview({ chords, melody, backing, timeSig, pxPerBeat, bars, cursorBeat }: Props) {
+export function LevelOverview({ chords, melody, backing, timeSig, pxPerBeat, bars, cursorBeat, pickup }: Props) {
   const bpb = beatsPerBar(timeSig);
-  const totalBeats = bars * bpb;
+  const totalBeats = pickup + bars * bpb;
   const width = totalBeats * pxPerBeat;
 
-  const midisFondo = backing.map((n) => pitchToMidi(n.pitch)).filter((m): m is number => m !== null);
+  // La melodía puede estar en su propia capa (nivel de notas) o dentro del fondo
+  // marcada como 'lead' (nivel de acordes). En los dos casos va en SU fila: si se
+  // dibuja mezclada con el resto del fondo, no se puede verificar nada.
+  const lead = backing.filter((n) => n.v === 'lead');
+  const resto = backing.filter((n) => n.v !== 'lead');
+
+  const midisFondo = resto.map((n) => pitchToMidi(n.pitch)).filter((m): m is number => m !== null);
   const lo = midisFondo.length ? Math.min(...midisFondo) : MIN_PLAYABLE_MIDI;
   const hi = midisFondo.length ? Math.max(...midisFondo) : MAX_PLAYABLE_MIDI;
   const span = Math.max(12, hi - lo);
 
+  const midisLead = lead.map((n) => pitchToMidi(n.pitch)).filter((m): m is number => m !== null);
+  const loL = midisLead.length ? Math.min(...midisLead) : MIN_PLAYABLE_MIDI;
+  const spanL = Math.max(12, (midisLead.length ? Math.max(...midisLead) : MAX_PLAYABLE_MIDI) - loL);
+
+  const barras = barLines(totalBeats, timeSig, pickup);
+  const esBarra = (b: number) => barras.some((x) => Math.abs(x - b) < 0.001);
   const lineas = [];
   for (let b = 1; b < totalBeats; b++) {
     lineas.push(
-      <div key={b} className={'beat-line' + (b % bpb === 0 ? ' bar' : '')} style={{ left: b * pxPerBeat }} />,
+      <div key={b} className={'beat-line' + (esBarra(b) ? ' bar' : '')} style={{ left: b * pxPerBeat }} />,
     );
   }
 
@@ -46,6 +59,11 @@ export function LevelOverview({ chords, melody, backing, timeSig, pxPerBeat, bar
     <div className="grid-wrap">
       <div className="grid-scroll" style={{ width: width + 62 }}>
         <div className="bar-ruler" style={{ marginLeft: 62 }}>
+          {pickup > 0 && (
+            <div className="bar" style={{ width: pickup * pxPerBeat }}>
+              alzada
+            </div>
+          )}
           {Array.from({ length: bars }, (_, i) => (
             <div key={i} className="bar" style={{ width: bpb * pxPerBeat }}>
               compás {i + 1}
@@ -101,8 +119,28 @@ export function LevelOverview({ chords, melody, backing, timeSig, pxPerBeat, bar
               );
             })}
 
+            {/* La melodía que vive dentro del fondo, en la fila de melodía */}
+            {lead.map((n, i) => {
+              const midi = pitchToMidi(n.pitch);
+              if (midi === null) return null;
+              const y = 1 - (midi - loL) / spanL;
+              return (
+                <div
+                  key={'l' + i}
+                  className="ov-note"
+                  style={{
+                    left: n.t * pxPerBeat,
+                    width: Math.max(n.dur * pxPerBeat - 2, 6),
+                    top: H_ACORDES + 5 + y * (H_MELODIA - 14),
+                    background: '#FFC42E',
+                  }}
+                  title={`${n.pitch} · beat ${n.t}`}
+                />
+              );
+            })}
+
             {/* Fondo, como piano roll */}
-            {backing.map((n, i) => {
+            {resto.map((n, i) => {
               const midi = pitchToMidi(n.pitch);
               if (midi === null) return null;
               const y = 1 - (midi - lo) / span;

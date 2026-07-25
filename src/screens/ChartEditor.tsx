@@ -128,8 +128,12 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
 
   // La grilla se estira a la capa más larga: el fondo puede pasarse de lo jugable.
   const bars = useMemo(
-    () => Math.max(barCount(playable, song.time_sig, minBars), barCount(backingNotes, song.time_sig, minBars)),
-    [playable, backingNotes, song.time_sig, minBars],
+    () =>
+      Math.max(
+        barCount(playable, song.time_sig, minBars, song.pickup_beats),
+        barCount(backingNotes, song.time_sig, minBars, song.pickup_beats),
+      ),
+    [playable, backingNotes, song.time_sig, minBars, song.pickup_beats],
   );
 
   const chordPcs: ChordPcs = useMemo(() => {
@@ -353,6 +357,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       chordPcs,
       recordedUrl: audioReady ? recordedUrl : null,
       recordedOffset: song.audio_offset_s,
+      pickup: song.pickup_beats,
       metronome,
       backing,
       onBeat: (b) => setCursorBeat(b),
@@ -728,6 +733,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
                 fretBrush={fretBrush}
                 selected={selected}
                 cursorBeat={cursorBeat}
+                pickup={song.pickup_beats}
                 onSelect={setSelected}
                 onChange={setMel}
               />
@@ -742,6 +748,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
                 brush={brush}
                 selected={selected}
                 cursorBeat={cursorBeat}
+                pickup={song.pickup_beats}
                 onSelect={setSelected}
                 onChange={setEv}
               />
@@ -830,6 +837,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
                 pxPerBeat={pxPerBeat}
                 bars={bars}
                 cursorBeat={cursorBeat}
+                pickup={song.pickup_beats}
               />
               <p className="muted" style={{ margin: '8px 0 0' }}>
                 Para verificar que la armonía calce con la melodía. Si un acorde cambia donde la
@@ -1094,10 +1102,13 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
           onApply={(r) => {
             // El compás y el tempo que propuso la IA se aplican ANTES que los eventos,
             // para que la grilla se dibuje con la medida correcta desde el primer cuadro.
-            if (r.setup?.timeSig || r.setup?.bpm) {
+            if (r.setup?.timeSig || r.setup?.bpm || r.setup?.pickup !== undefined) {
               patch({
                 ...(r.setup.timeSig ? { time_sig: r.setup.timeSig } : {}),
                 ...(r.setup.bpm ? { bpm: r.setup.bpm } : {}),
+                // La anacrusa se deduce del primer compás corto: sin guardarla, las
+                // barras se dibujan cada N desde cero y todo se ve corrido.
+                pickup_beats: r.setup.pickup ?? 0,
               });
             }
             if (importTarget === 'nivel') {

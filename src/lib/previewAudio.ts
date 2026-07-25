@@ -24,6 +24,8 @@ export interface PlayOptions {
   melodyNotes?: MelodyEvent[];
   /** Melodía de acompañamiento importada (la toca la app, no el alumno). */
   backingNotes?: BackingEvent[];
+  /** Anacrusa en tiempos: corre el acento del metrónomo al tiempo fuerte real. */
+  pickup?: number;
   /** Acompañamiento GRABADO. Si viene, reemplaza a todo lo sintetizado. */
   recordedUrl?: string | null;
   /** Corrimiento en segundos de la grabación respecto del tiempo 1. */
@@ -238,7 +240,7 @@ export class PreviewAudio {
     const ctx = this.ensureCtx();
     const {
       events, bpm, beatsPerBar, chordPcs, backingNotes = [], melodyNotes = [],
-      recordedUrl = null, recordedOffset = 0,
+      recordedUrl = null, recordedOffset = 0, pickup = 0,
       countInBars = 1, metronome = true, backing = true,
       onBeat, onEnd,
     } = opts;
@@ -260,7 +262,12 @@ export class PreviewAudio {
       // Igual que en la app de alumnos: con grabación, el clic marca solo la entrada.
       const hasta = recorded ? countInBeats : totalBeats;
       for (let i = 0; i < hasta; i++) {
-        this.scheduleClick(startTime + i * beatDur, i % beatsPerBar === 0);
+        // El acento marca el tiempo fuerte REAL. Con anacrusa, el primer compás
+        // completo no empieza en el beat 0 sino después: acentuar cada N desde cero
+        // pone el golpe en la sílaba equivocada y la canción no se reconoce.
+        const desdeElUno = i - countInBeats - pickup;
+        const acento = ((desdeElUno % beatsPerBar) + beatsPerBar) % beatsPerBar === 0;
+        this.scheduleClick(startTime + i * beatDur, acento);
       }
     }
     if (recorded) {

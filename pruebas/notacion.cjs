@@ -197,6 +197,29 @@ check('el aviso dice de qué capa es',
   rnm.issues.some((i) => /^Acordes · /.test(i.message)),
   JSON.stringify(rnm.issues.map((i) => i.message)));
 
+console.log('\n=== Anacrusa: se detecta y las barras se corren ===');
+const F = require('./build/chartFormat.js');
+// El caso real: Feliz cumpleaños con anacrusa de 1 tiempo en 3/4.
+const conAlzada = 'COMPAS: 3/4\nACORDES: | r/1 | C/3 | G/3 | G/3 |';
+const ra = N.parseNotation(conAlzada, { target: 'chords', beatsPerBar: 3, knownChords: ['C', 'G'] });
+check('detecta la anacrusa de 1 tiempo', ra.suggested.pickup === 1, String(ra.suggested.pickup));
+check('sin errores (la alzada no bloquea)', ra.issues.filter((i) => i.level === 'error').length === 0);
+check('el primer acorde arranca en el beat 1', ra.chordEvents[0].t === 1, String(ra.chordEvents[0].t));
+
+// Sin anacrusa no se inventa ninguna.
+const sinAlzada = N.parseNotation('COMPAS: 3/4\nACORDES: | C/3 | G/3 |', { target: 'chords', beatsPerBar: 3, knownChords: ['C', 'G'] });
+check('sin primer compás corto no propone anacrusa', sinAlzada.suggested.pickup === undefined);
+
+// Las barras: con alzada de 1 en 3/4 van en 1, 4, 7... no en 3, 6, 9.
+check('las barras se corren con la anacrusa',
+  JSON.stringify(F.barLines(10, '3/4', 1)) === JSON.stringify([1, 4, 7]),
+  JSON.stringify(F.barLines(10, '3/4', 1)));
+check('sin anacrusa las barras van cada N desde cero',
+  JSON.stringify(F.barLines(10, '3/4', 0)) === JSON.stringify([3, 6, 9]),
+  JSON.stringify(F.barLines(10, '3/4', 0)));
+check('con anacrusa se dibuja un compás más (el de alzada)',
+  F.barCount([{ t: 0, dur: 25 }], '3/4', 1, 1) === 9, String(F.barCount([{ t: 0, dur: 25 }], '3/4', 1, 1)));
+
 console.log('\n=== Voces del fondo (melodía, bajo, acompañamiento) ===');
 const conVoces = [
   'COMPAS: 3/4',

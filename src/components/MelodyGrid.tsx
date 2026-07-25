@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { UKE_STRINGS, beatsPerBar, snap, tidy } from '../lib/chartFormat';
+import { UKE_STRINGS, barLines, beatsPerBar, snap, tidy } from '../lib/chartFormat';
 import type { MelodyEvent, UkeString } from '../lib/chartFormat';
 import { STRING_MIDI, midiToPitch } from '../lib/notation';
 
@@ -24,6 +24,8 @@ interface Props {
   fretBrush: number;
   selected: number | null;
   cursorBeat: number | null;
+  /** Anacrusa en tiempos: corre las barras de compás. */
+  pickup: number;
   onSelect: (index: number | null) => void;
   onChange: (events: MelodyEvent[]) => void;
 }
@@ -39,11 +41,12 @@ type Drag =
  */
 export function MelodyGrid({
   events, timeSig, step, pxPerBeat, bars, defaultDur, fretBrush,
-  selected, cursorBeat, onSelect, onChange,
+  selected, cursorBeat, pickup, onSelect, onChange,
 }: Props) {
   const bpb = beatsPerBar(timeSig);
-  const totalBeats = bars * bpb;
+  const totalBeats = pickup + bars * bpb;
   const width = totalBeats * pxPerBeat;
+  const barras = barLines(totalBeats, timeSig, pickup);
 
   const lanesRef = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ beat: number; lane: number } | null>(null);
@@ -122,10 +125,11 @@ export function MelodyGrid({
     onSelect(events.length);
   }
 
+  const esBarra = (b: number) => barras.some((x) => Math.abs(x - b) < 0.001);
   const lines = [];
   for (let b = 1; b < totalBeats; b++) {
     lines.push(
-      <div key={b} className={'beat-line' + (b % bpb === 0 ? ' bar' : '')} style={{ left: b * pxPerBeat }} />,
+      <div key={b} className={'beat-line' + (esBarra(b) ? ' bar' : '')} style={{ left: b * pxPerBeat }} />,
     );
   }
 
@@ -133,6 +137,11 @@ export function MelodyGrid({
     <div className="grid-wrap">
       <div className="grid-scroll" style={{ width: width + 34 }}>
         <div className="bar-ruler" style={{ marginLeft: 34 }}>
+          {pickup > 0 && (
+            <div className="bar" style={{ width: pickup * pxPerBeat }}>
+              alzada
+            </div>
+          )}
           {Array.from({ length: bars }, (_, i) => (
             <div key={i} className="bar" style={{ width: bpb * pxPerBeat }}>
               compás {i + 1}
