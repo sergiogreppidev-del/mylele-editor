@@ -508,7 +508,11 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     const bck = overrideBacking ?? backingNotes;
     if (evs.length === 0 && bck.length === 0) return;
     // El compás 1 arranca donde termina la anacrusa, no en el tiempo 0.
-    const desdeBeat = desdeCompas <= 1 ? 0 : song.pickup_beats + (desdeCompas - 1) * bpb;
+    // Se acota contra `bars`: si el nivel se acortó —al vaciar el chart, o al
+    // importar uno más corto— el compás elegido puede haber quedado más allá del
+    // final, y la reproducción arrancaría después de todo: silencio, y parece roto.
+    const compas = Math.max(1, Math.min(desdeCompas, bars));
+    const desdeBeat = compas <= 1 ? 0 : song.pickup_beats + (compas - 1) * bpb;
     audio.current?.play({
       events: evs.filter((e): e is ChordEvent => 'chord' in e),
       melodyNotes: evs.filter((e): e is MelodyEvent => 'string' in e),
