@@ -15,11 +15,11 @@ import { ImportDialog } from '../components/ImportDialog';
 import { STRING_MIDI, midiToPitch, validateBacking } from '../lib/notation';
 import type { ImportTarget } from '../lib/aiPrompt';
 import {
-  BACKING_MODE, BPM_MAX, BPM_MIN, MAX_FRET, UKE_STRINGS, barCount, beatsPerBar, chartLengthBeats,
+  BACKING_MODE, BPM_MAX, BPM_MIN, DIFICULTADES, MAX_FRET, UKE_STRINGS, barCount, beatsPerBar, chartLengthBeats,
   dirForBeat, hasErrors, tidy, validateChart, validateSong,
 } from '../lib/chartFormat';
 import type {
-  BackingEvent, ChartEvent, ChartMode, ChordEvent, MelodyEvent, Song, StrumPattern,
+  BackingEvent, ChartEvent, ChartMode, ChordEvent, Difficulty, MelodyEvent, Song, StrumPattern,
 } from '../lib/chartFormat';
 import {
   EMPTY_SONG, backingUrl, deleteBacking, discardDraft, discardSongDraft, effectiveSong,
@@ -58,6 +58,8 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   const [melody, setMelody] = useState<MelodyEvent[]>([]);
   const [backingNotes, setBackingNotes] = useState<BackingEvent[]>([]);
   const [importTarget, setImportTarget] = useState<ImportTarget | null>(null);
+  /** Qué versión se está editando. La elige el juego, no el alumno. */
+  const [dificultad, setDificultad] = useState<Difficulty>('facil');
 
   const [brush, setBrush] = useState<string | null>(chords[0]?.id ?? null);
   const [fretBrush, setFretBrush] = useState(0);
@@ -101,7 +103,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
         const row = await getSong(songId);
         if (!alive) return;
         const m = songMode(row);
-        const work = workingChart(row, m);
+        const work = workingChart(row, m, dificultad);
         setLoaded(row);
         setId(row.id);
         setMode(m);
@@ -120,7 +122,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
     return () => {
       alive = false;
     };
-  }, [songId]);
+  }, [songId, dificultad]);
 
   const bpb = beatsPerBar(song.time_sig);
   /** Lo que toca el alumno, sea acordes o notas. */
@@ -151,8 +153,8 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   const allIssues = [...songIssues, ...chartIssues, ...backingIssues];
   const blocked = hasErrors(allIssues);
 
-  const liveChart: ChartRow | null = loaded ? publishedChart(loaded, mode) : null;
-  const workChart: ChartRow | null = loaded ? workingChart(loaded, mode) : null;
+  const liveChart: ChartRow | null = loaded ? publishedChart(loaded, mode, dificultad) : null;
+  const workChart: ChartRow | null = loaded ? workingChart(loaded, mode, dificultad) : null;
   const hasUnpublishedDraft = !!workChart && !workChart.published;
   const fichaEnBorrador = !!loaded && hasSongDraft(loaded);
 
@@ -397,7 +399,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       }
 
       const existing = loaded?.charts ?? [];
-      const draft = await saveDraft(sid, mode, playable, existing);
+      const draft = await saveDraft(sid, mode, playable, existing, dificultad);
       if (publish) await publishChart(draft.id);
 
       // El fondo es un chart aparte, con su propia versión y su propio publicado.
@@ -453,7 +455,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       await discardDraft(workChart.id);
       const fresh = await getSong(id!);
       setLoaded(fresh);
-      const work = workingChart(fresh, mode);
+      const work = workingChart(fresh, mode, dificultad);
       setEvents((work?.events ?? []).filter((e): e is ChordEvent => 'chord' in e));
       setMelody((work?.events ?? []).filter((e): e is MelodyEvent => 'string' in e));
       setBackingNotes(workingChart(fresh, BACKING_MODE)?.backing ?? []);
@@ -639,6 +641,35 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       {/* ---------- 2 · MÚSICA ---------- */}
       {paso === 'musica' && (
         <>
+          {/* La dificultad la impone el juego según cómo progresa el alumno; acá
+              solo se elige cuál de las dos versiones se está editando. */}
+          <div className="resumen">
+            <span className="dato">Estás editando la versión</span>
+            {DIFICULTADES.map((d) => {
+              const existe = !!loaded && !!workingChart(loaded, mode, d.id);
+              return (
+                <CandyButton
+                  key={d.id}
+                  small
+                  tone={dificultad === d.id ? 'grape' : 'ghost'}
+                  onClick={() => {
+                    if (dirty && !window.confirm('Tenés cambios sin guardar. ¿Cambiar de versión igual?')) return;
+                    setDificultad(d.id);
+                    setSelected(null);
+                  }}
+                >
+                  {d.label}
+                  {existe ? ' ✓' : ''}
+                </CandyButton>
+              );
+            })}
+            <span className="muted grow">
+              {dificultad === 'dificil' && !workChart
+                ? 'La versión difícil arranca en blanco. La música de fondo es la misma para las dos.'
+                : 'El alumno no elige: el juego le da una u otra según su progreso.'}
+            </span>
+          </div>
+
           {/* ---------- paleta ---------- */}
           <div className="card">
             <div className="row" style={{ marginBottom: 10 }}>

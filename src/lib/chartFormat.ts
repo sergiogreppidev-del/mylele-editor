@@ -13,6 +13,16 @@
 export type ChartMode = 'chords' | 'melody';
 /** Capa de acompañamiento: la reproduce la app, el alumno no la toca. */
 export const BACKING_MODE = 'backing';
+
+/**
+ * Dificultad de lo que toca el alumno. NO la elige él: se la impone el juego
+ * según cómo va progresando. La música de fondo es la misma en las dos.
+ */
+export type Difficulty = 'facil' | 'dificil';
+export const DIFICULTADES: { id: Difficulty; label: string }[] = [
+  { id: 'facil', label: 'Fácil' },
+  { id: 'dificil', label: 'Difícil' },
+];
 export type AnyChartMode = ChartMode | typeof BACKING_MODE;
 export type StrumDir = 'd' | 'u';
 export type UkeString = 'G' | 'C' | 'E' | 'A';

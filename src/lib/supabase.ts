@@ -23,6 +23,28 @@ export async function checkIsAdmin(): Promise<boolean> {
   return data === true;
 }
 
+/**
+ * Le pide el texto a Gemini a través de una función de Supabase.
+ * La clave de Gemini vive allá, no acá: este sitio es público y una clave en el
+ * navegador se la lleva cualquiera que abra las herramientas de desarrollo.
+ */
+export async function generarConGemini(prompt: string): Promise<{ texto: string; cortado: boolean }> {
+  const { data, error } = await supabase.functions.invoke('generar-nivel', { body: { prompt } });
+  if (error) {
+    // El cuerpo del error trae el motivo real; sin esto solo se ve "non-2xx".
+    let detalle = error.message;
+    try {
+      const ctx = (error as { context?: Response }).context;
+      if (ctx) detalle = (await ctx.json())?.error ?? detalle;
+    } catch {
+      /* nos quedamos con el mensaje genérico */
+    }
+    throw new Error(detalle);
+  }
+  if (data?.error) throw new Error(data.error);
+  return { texto: String(data?.texto ?? ''), cortado: !!data?.cortado };
+}
+
 /** Mensaje en castellano para los errores que más van a aparecer. */
 export function friendlyError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);

@@ -2,7 +2,7 @@
 
 import { supabase } from './supabase';
 import { BACKING_MODE, parseBacking, parseEvents, serializeBacking, serializeEvents } from './chartFormat';
-import type { AnyChartMode, BackingEvent, ChartEvent, ChartMode, Song } from './chartFormat';
+import type { AnyChartMode, BackingEvent, ChartEvent, ChartMode, Difficulty, Song } from './chartFormat';
 
 export interface ChordRow {
   id: string;
@@ -20,6 +20,8 @@ export interface ChartRow {
   id: string;
   song_id: string;
   mode: AnyChartMode;
+  /** Solo aplica a lo jugable; el fondo va siempre en 'facil'. */
+  difficulty: Difficulty;
   version: number;
   published: boolean;
   /** Eventos jugables. Vacío cuando el chart es la capa de fondo. */
@@ -136,7 +138,7 @@ export function chordUsage(songs: SongRow[], chordId: string): string[] {
 export async function listSongs(): Promise<SongRow[]> {
   const { data, error } = await supabase
     .from('songs')
-    .select('*, charts(id, song_id, mode, version, events, published)')
+    .select('*, charts(id, song_id, mode, difficulty, version, events, published)')
     .order('level', { ascending: true })
     .order('title', { ascending: true });
   if (error) throw error;
@@ -146,7 +148,7 @@ export async function listSongs(): Promise<SongRow[]> {
 export async function getSong(id: string): Promise<SongRow> {
   const { data, error } = await supabase
     .from('songs')
-    .select('*, charts(id, song_id, mode, version, events, published)')
+    .select('*, charts(id, song_id, mode, difficulty, version, events, published)')
     .eq('id', id)
     .single();
   if (error) throw error;
@@ -164,6 +166,7 @@ function normalizeSongRow(raw: unknown): SongRow {
     charts: (r.charts ?? []).map((c) => ({
       ...c,
       // El mismo campo jsonb guarda dos formas distintas según el modo.
+      difficulty: (c.difficulty ?? 'facil') as Difficulty,
       events: c.mode === BACKING_MODE ? [] : parseEvents(c.events),
       backing: c.mode === BACKING_MODE ? parseBacking(c.events) : [],
     })),
@@ -249,12 +252,15 @@ export async function saveDraft(
   mode: AnyChartMode,
   events: ChartEvent[] | BackingEvent[],
   existingCharts: ChartRow[],
+  difficulty: Difficulty = 'facil',
 ): Promise<ChartRow> {
   const clean =
     mode === BACKING_MODE
       ? serializeBacking(events as BackingEvent[])
       : serializeEvents(events as ChartEvent[]);
-  const sameMode = existingCharts.filter((c) => c.mode === mode);
+  // El fondo es el mismo para las dos dificultades, así que vive siempre en 'facil'.
+  const dif: Difficulty = mode === BACKING_MODE ? 'facil' : difficulty;
+  const sameMode = existingCharts.filter((c) => c.mode === mode && c.difficulty === dif);
   const draft = sameMode.filter((c) => !c.published).sort((a, b) => b.version - a.version)[0];
 
   if (draft) {
@@ -271,7 +277,7 @@ export async function saveDraft(
   const nextVersion = sameMode.reduce((m, c) => Math.max(m, c.version), 0) + 1;
   const { data, error } = await supabase
     .from('charts')
-    .insert({ song_id: songId, mode, version: nextVersion, events: clean, published: false })
+    .insert({ song_id: songId, mode, difficulty: dif, version: nextVersion, events: clean, published: false })
     .select()
     .single();
   if (error) throw error;
@@ -282,6 +288,7 @@ function normalizeChartRow(raw: unknown): ChartRow {
   const c = raw as ChartRow;
   return {
     ...c,
+    difficulty: (c.difficulty ?? 'facil') as Difficulty,
     events: c.mode === BACKING_MODE ? [] : parseEvents(c.events),
     backing: c.mode === BACKING_MODE ? parseBacking(c.events) : [],
   };
@@ -323,15 +330,17 @@ export async function duplicateSong(source: SongRow): Promise<SongRow> {
 
   // Se copian todas las capas del nivel (lo jugable y el fondo). De cada una,
   // la que está en vivo; si no hay, el borrador más nuevo.
-  const modes = [...new Set(source.charts.map((c) => c.mode))];
-  const rows = modes
-    .map((mode) => {
-      const same = source.charts.filter((c) => c.mode === mode);
+  const combos = [...new Set(source.charts.map((c) => c.mode + '|' + c.difficulty))];
+  const rows = combos
+    .map((combo) => {
+      const [mode, difficulty] = combo.split('|') as [AnyChartMode, Difficulty];
+      const same = source.charts.filter((c) => c.mode === mode && c.difficulty === difficulty);
       const src = same.find((c) => c.published) ?? [...same].sort((a, b) => b.version - a.version)[0];
       if (!src) return null;
       return {
         song_id: created.id,
         mode,
+        difficulty,
         version: 1,
         events: mode === BACKING_MODE ? serializeBacking(src.backing) : serializeEvents(src.events),
         published: false, // la copia arranca como borrador: no aparece en la app de alumnos
@@ -349,14 +358,16 @@ export async function duplicateSong(source: SongRow): Promise<SongRow> {
 /* ---------------- Ayudas ---------------- */
 
 /** El chart que está editando el editor: el borrador si existe, si no el publicado. */
-export function workingChart(song: SongRow, mode: AnyChartMode): ChartRow | null {
-  const same = song.charts.filter((c) => c.mode === mode);
+export function workingChart(song: SongRow, mode: AnyChartMode, difficulty: Difficulty = 'facil'): ChartRow | null {
+  const dif = mode === BACKING_MODE ? 'facil' : difficulty;
+  const same = song.charts.filter((c) => c.mode === mode && c.difficulty === dif);
   const draft = same.filter((c) => !c.published).sort((a, b) => b.version - a.version)[0];
   return draft ?? same.find((c) => c.published) ?? null;
 }
 
-export function publishedChart(song: SongRow, mode: AnyChartMode): ChartRow | null {
-  return song.charts.find((c) => c.mode === mode && c.published) ?? null;
+export function publishedChart(song: SongRow, mode: AnyChartMode, difficulty: Difficulty = 'facil'): ChartRow | null {
+  const dif = mode === BACKING_MODE ? 'facil' : difficulty;
+  return song.charts.find((c) => c.mode === mode && c.difficulty === dif && c.published) ?? null;
 }
 
 /**

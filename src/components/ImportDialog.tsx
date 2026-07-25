@@ -7,6 +7,7 @@ import { parseNotation, toNotation } from '../lib/notation';
 import type { SuggestedSetup } from '../lib/notation';
 import { parseBacking, parseEvents, tidy } from '../lib/chartFormat';
 import type { BackingEvent, ChordEvent, Issue, MelodyEvent } from '../lib/chartFormat';
+import { friendlyError, generarConGemini } from '../lib/supabase';
 
 interface Props {
   target: ImportTarget;
@@ -46,6 +47,8 @@ export function ImportDialog(props: Props) {
   /** false = la IA decide compás y tempo (lo normal). true = los impone el autor. */
   const [imponerMedida, setImponerMedida] = useState(false);
   const [aplicarSetup, setAplicarSetup] = useState(true);
+  const [generando, setGenerando] = useState(false);
+  const [errorIA, setErrorIA] = useState<string | null>(null);
 
   /** Generar el nivel entero reemplaza las tres capas: agregar al final no aplica. */
   const esNivelCompleto = target === 'nivel';
@@ -149,6 +152,31 @@ export function ImportDialog(props: Props) {
     setText(toNotation(current as never, beatsPerBar));
   }
 
+  /** El camino sin salir de la app: se lo pedimos a Gemini y cae en el cuadro de texto. */
+  async function generar() {
+    setGenerando(true);
+    setErrorIA(null);
+    try {
+      const { texto, cortado } = await generarConGemini(
+        buildAiPrompt({
+          target, title: props.title, bpm: props.bpm, timeSig: props.timeSig,
+          beatsPerBar, bars, knownChords, pedido, imponerMedida, melodiaDelNivel,
+        }),
+      );
+      // Gemini a veces envuelve la respuesta en un bloque de código igual.
+      setText(texto.replace(/^```[a-z]*\n?/i, '').replace(/```\s*$/, '').trim());
+      if (cortado) {
+        setErrorIA(
+          'Gemini se quedó sin espacio y cortó la respuesta. Revisá el final: puede faltar el último tramo.',
+        );
+      }
+    } catch (e) {
+      setErrorIA(friendlyError(e));
+    } finally {
+      setGenerando(false);
+    }
+  }
+
   return (
     <div className="overlay" onClick={props.onClose}>
       <div className="card dialog" onClick={(e) => e.stopPropagation()}>
@@ -170,10 +198,14 @@ export function ImportDialog(props: Props) {
               value={pedido}
               onChange={(e) => setPedido(e.target.value)}
             />
-            <CandyButton small tone="sun" onClick={() => void copyPrompt()}>
-              {copied ? '✓ Copiado' : '📋 Copiar instrucciones'}
+            <CandyButton small tone="lime" onClick={() => void generar()} disabled={generando}>
+              {generando ? '⏳ Generando…' : '✨ Generar con Gemini'}
+            </CandyButton>
+            <CandyButton small tone="ghost" onClick={() => void copyPrompt()}>
+              {copied ? '✓ Copiado' : '📋 Copiar'}
             </CandyButton>
           </div>
+          {errorIA && <div className="notice bad" style={{ marginTop: 8 }}>{errorIA}</div>}
           {!esNivelCompleto && (
             <label className="row" style={{ gap: 7, marginTop: 8 }}>
               <input
