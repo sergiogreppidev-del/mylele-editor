@@ -603,6 +603,72 @@ console.log('\n=== Musica o metronomo ===');
     Q.detectarMetronomo(clavado.map((x) => ({ ...x, v: 'lead' })), '4/4', 0).length === 0);
 }
 
+/* ===================================================================
+   Herramientas de estructura.
+
+   El bug que las trajo hasta aca: "Repetir todo x 2" copiaba solo la capa
+   que toca el alumno, asi que la segunda vuelta quedaba en silencio.
+   =================================================================== */
+console.log('\n=== Repetir y duplicar mueven TODAS las capas ===');
+{
+  const E = require('./build/estructura.js');
+  const ev = (ts) => ts.map((t) => ({ t, dur: 1 }));
+
+  // --- bloque de repeticion ---
+  check('sin anacrusa, redondea al compas entero', E.bloqueDeRepeticion(14, 0, 4) === 16);
+  check('lo que ya cierra en compases no se estira', E.bloqueDeRepeticion(16, 0, 4) === 16);
+  check('con anacrusa se cuenta DESDE la alzada', E.bloqueDeRepeticion(10, 1, 3) === 10);
+  check('y no desde cero (que daria 12)', E.bloqueDeRepeticion(10, 1, 3) !== 12);
+  check('un largo menor que la anacrusa no se rompe', E.bloqueDeRepeticion(0.5, 1, 4) === 4);
+
+  // --- repetir ---
+  const base = ev([0, 4, 8, 12]);
+  const dos = E.repetir(base, 2, 16);
+  check('repetir x2 duplica la cantidad', dos.length === 8);
+  check('la segunda vuelta arranca en el bloque', dos[4].t === 16);
+  check('y termina donde corresponde', dos[7].t === 28);
+  check('repetir x3 triplica', E.repetir(base, 3, 16).length === 12);
+  check('repetir x1 no toca nada', E.repetir(base, 1, 16) === base);
+  check('una lista vacia se devuelve igual', E.repetir([], 3, 16).length === 0);
+
+  // LO IMPORTANTE: las dos capas se repiten con el MISMO bloque, asi que
+  // siguen alineadas. Antes el fondo no se repetia y quedaba en silencio.
+  const jugable = ev([0, 4, 8, 12]);
+  const fondo = ev([0, 2, 4, 6, 8, 10, 12, 14]);
+  const largo = Math.max(16, 16);
+  const bloque = E.bloqueDeRepeticion(largo, 0, 4);
+  const j2 = E.repetir(jugable, 2, bloque);
+  const f2 = E.repetir(fondo, 2, bloque);
+  check('la segunda vuelta del fondo existe', f2.length === 16);
+  check('y arranca junto con la del ejercicio', f2[8].t === j2[4].t);
+  check('el fondo cubre toda la segunda vuelta',
+    Math.max(...f2.map((e) => e.t)) >= Math.max(...j2.map((e) => e.t)));
+
+  // Si el fondo es MAS largo que lo jugable, el bloque tiene que salir de el:
+  // medirlo sobre lo jugable hacia que cada vuelta pisara el final de la anterior.
+  const bloqueCorto = E.bloqueDeRepeticion(16, 0, 4);
+  const bloqueReal = E.bloqueDeRepeticion(Math.max(16, 24), 0, 4);
+  check('el bloque sale de la capa mas larga', bloqueReal === 24 && bloqueCorto === 16);
+  check('con el bloque corto la segunda vuelta pisaria el final',
+    E.repetir(ev([0, 20]), 2, bloqueCorto)[2].t < 24);
+
+  // --- duplicar compas ---
+  const cuatro = ev([0, 4, 8, 12]);
+  const dup = E.duplicarCompas(cuatro, 4, 4);
+  check('duplicar un compas agrega un evento', dup.length === 5);
+  check('lo que venia despues se corre un compas',
+    dup.filter((e) => e.t === 12).length === 1 && dup.some((e) => e.t === 16));
+  check('la copia queda justo despues del original', dup.filter((e) => e.t === 8).length === 1);
+  const dupPrimero = E.duplicarCompas(cuatro, 0, 4);
+  check('duplicar el primero corre todo lo demas', dupPrimero.some((e) => e.t === 16));
+  check('duplicar un compas vacio no agrega nada', E.duplicarCompas(cuatro, 100, 4).length === 4);
+
+  // --- donde empieza cada compas ---
+  check('sin anacrusa el compas 1 empieza en 0', E.inicioDelCompas(1, 0, 4) === 0);
+  check('con anacrusa el compas 1 empieza despues de la alzada', E.inicioDelCompas(1, 1, 3) === 1);
+  check('el compas 3 con alzada', E.inicioDelCompas(3, 1, 3) === 7);
+}
+
 console.log('\n=== Ida y vuelta (exportar y volver a leer) ===');
 const texto = N.toNotation(r5.chordEvents, 4);
 console.log('        exportado:', texto);

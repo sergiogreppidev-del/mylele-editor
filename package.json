@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "probar": "tsc src/lib/chartFormat.ts src/lib/notation.ts src/lib/aiPrompt.ts src/lib/chartPick.ts src/lib/dificultad.ts src/lib/calidad.ts --outDir pruebas/build --module commonjs --target es2020 --moduleResolution node --skipLibCheck && node pruebas/notacion.cjs"
+    "probar": "tsc src/lib/chartFormat.ts src/lib/notation.ts src/lib/aiPrompt.ts src/lib/chartPick.ts src/lib/dificultad.ts src/lib/calidad.ts src/lib/estructura.ts --outDir pruebas/build --module commonjs --target es2020 --moduleResolution node --skipLibCheck && node pruebas/notacion.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

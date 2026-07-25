@@ -260,13 +260,25 @@ export function ImportDialog(props: Props) {
     (parsed?.issues.some((i) => /se cort[oó] antes de terminar/.test(i.message)) ?? false) ||
     (esNivelCompleto && !!parsed && capasQueFaltan().length > 0);
 
+  /**
+   * Cerrar el diálogo tira lo pegado y lo generado. Un clic al lado de la ventana
+   * no puede costar una canción entera, así que si hay algo escrito se pregunta.
+   */
+  function cerrar() {
+    const hayAlgo = text.trim() !== '' || pedido.trim() !== '';
+    if (hayAlgo && !window.confirm('Si cerrás se pierde lo que trajo la IA y lo que pegaste. ¿Cerrar igual?')) {
+      return;
+    }
+    props.onClose();
+  }
+
   return (
-    <div className="overlay" onClick={props.onClose}>
+    <div className="overlay" onClick={cerrar}>
       <div className="card dialog" onClick={(e) => e.stopPropagation()}>
         <div className="row">
           <h2 style={{ fontSize: 20 }}>Importar {TARGET_LABEL[target]}</h2>
           <div className="grow" />
-          <CandyButton small tone="ghost" onClick={props.onClose}>
+          <CandyButton small tone="ghost" onClick={cerrar}>
             ✕
           </CandyButton>
         </div>
@@ -585,7 +597,7 @@ export function ImportDialog(props: Props) {
           >
             Aceptar
           </CandyButton>
-          <CandyButton tone="ghost" onClick={props.onClose}>
+          <CandyButton tone="ghost" onClick={cerrar}>
             Cancelar
           </CandyButton>
           <div className="grow" />

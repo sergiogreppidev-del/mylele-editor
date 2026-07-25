@@ -15,6 +15,7 @@ import { ImportDialog } from '../components/ImportDialog';
 import { DificultadPanel } from '../components/DificultadPanel';
 import { acordesPara, medirAcordes, medirMelodia, verificarPerfil } from '../lib/dificultad';
 import { avisosDeArmonia, detectarMetronomo, melodiaDelNivel, verificarArmonia } from '../lib/calidad';
+import { bloqueDeRepeticion, duplicarCompas, inicioDelCompas, repetir } from '../lib/estructura';
 import type { Digitaciones } from '../lib/dificultad';
 import { STRING_MIDI, midiToPitch, validateBacking } from '../lib/notation';
 import type { ImportTarget } from '../lib/aiPrompt';
@@ -76,7 +77,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
   const [minBars, setMinBars] = useState(4);
   const [defaultDur, setDefaultDur] = useState(4);
 
-  const [paso, setPaso] = useState<'datos' | 'musica' | 'sonido' | 'publicar'>('datos');
+  const [paso, setPaso] = useState<'nivel' | 'sonido' | 'publicar'>('nivel');
   const [uploading, setUploading] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
   const [cursorBeat, setCursorBeat] = useState<number | null>(null);
@@ -131,7 +132,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
       // después de lo que devuelva la IA era lo que impedía crear niveles de notas.
       setMode(nuevoModo ?? 'chords');
       setDificultad('facil');
-      setPaso('datos');   // un nivel nuevo empieza por la ficha, que está vacía
+      setPaso('nivel');
       return;
     }
     void (async () => {
@@ -148,9 +149,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
         setDificultad(d);
         setSong(effectiveSong(row));   // lo publicado con el borrador de la ficha encima
         cargarCapas(row, m, d);
-        // Un nivel que ya existe tiene la ficha completa: se entra directo a la
-        // música, que es lo que se viene a tocar el 90% de las veces.
-        setPaso('musica');
+        setPaso('nivel');
       } catch (e) {
         if (alive) setError(friendlyError(e));
       }
@@ -317,9 +316,10 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     patch({ title, ...(tocadoAMano ? {} : { slug: aSlug(title) }) });
   }
 
+  /* Datos y Música eran dos pasos separados, pero se editan juntos: cambiar el
+     compás o el BPM se hace mirando la grilla, no antes de verla. Van en uno solo. */
   const PASOS: Step[] = [
-    { id: 'datos', label: 'Datos', problema: hasErrors(songIssues) },
-    { id: 'musica', label: 'Música', problema: hasErrors(chartIssues) },
+    { id: 'nivel', label: 'El nivel', problema: hasErrors(songIssues) || hasErrors(chartIssues) },
     { id: 'sonido', label: 'Sonido', problema: hasErrors(backingIssues) },
     { id: 'publicar', label: 'Publicar' },
   ];
@@ -419,28 +419,33 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
 
   /* ---------- herramientas ---------- */
 
-  /** Copia un compás e inserta la copia justo después, corriendo lo que venga detrás. */
-  function duplicateBar(barIndex: number) {
-    const from = barIndex * bpb;
-    const to = from + bpb;
-    const inBar = playable.filter((e) => e.t >= from && e.t < to);
-    if (inBar.length === 0) return;
-    const shifted = playable.map((e) => (e.t >= to ? { ...e, t: tidy(e.t + bpb) } : e));
-    const copy = inBar.map((e) => ({ ...e, t: tidy(e.t + bpb) }));
-    setPlayable([...shifted, ...copy]);
+  /* Las dos herramientas de estructura mueven TODAS las capas, no solo la jugable.
+     Antes tocaban únicamente lo que toca el alumno: al repetir el nivel × 2, la
+     segunda vuelta quedaba en silencio, y al duplicar un compás el acompañamiento
+     se corría respecto de los acordes. */
+
+  /** Copia un compás en TODAS las capas e inserta la copia justo después. */
+  function duplicateBar(barNumero: number) {
+    const desde = inicioDelCompas(barNumero, song.pickup_beats, bpb);
+    const hayAlgo =
+      playable.some((e) => e.t >= desde - 0.001 && e.t < desde + bpb - 0.001) ||
+      backingNotes.some((e) => e.t >= desde - 0.001 && e.t < desde + bpb - 0.001);
+    if (!hayAlgo) return;
+
+    setPlayable(duplicarCompas(playable, desde, bpb));
+    if (backingNotes.length) applyBacking(duplicarCompas(backingNotes, desde, bpb));
     setSelected(null);
   }
 
-  /** Repite la progresión completa N veces (útil para armar una canción entera). */
-  function repeatAll(times: number) {
-    if (playable.length === 0 || times < 2) return;
-    const lenBars = Math.ceil(chartLengthBeats(playable) / bpb);
-    const block = lenBars * bpb;
-    const out = [...playable];
-    for (let k = 1; k < times; k++) {
-      playable.forEach((e) => out.push({ ...e, t: tidy(e.t + block * k) }));
-    }
-    setPlayable(out);
+  /** Repite el nivel entero N veces: lo jugable Y el acompañamiento. */
+  function repeatAll(veces: number) {
+    if (veces < 2) return;
+    const largo = Math.max(chartLengthBeats(playable), chartLengthBeats(backingNotes));
+    if (largo <= 0) return;
+    const bloque = bloqueDeRepeticion(largo, song.pickup_beats, bpb);
+
+    setPlayable(repetir(playable, veces, bloque));
+    if (backingNotes.length) applyBacking(repetir(backingNotes, veces, bloque));
     setSelected(null);
   }
 
@@ -654,11 +659,13 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
       {error && <div className="notice bad">{error}</div>}
       {flash && <div className="notice good">{flash}</div>}
 
-      {/* ---------- 1 · DATOS DEL NIVEL ---------- */}
-      {paso === 'datos' ? (
+      {/* ---------- 1 · EL NIVEL (ficha + música) ---------- */}
+      {paso === 'nivel' ? (
         <div className="card">
           <div className="row" style={{ marginBottom: 10 }}>
-            <div className="section-title grow">Datos del nivel</div>
+            <div className="section-title grow">
+              Datos del nivel · {mode === 'melody' ? '🎵 notas' : '🎸 acordes'}
+            </div>
             {fichaEnBorrador && (
               <>
                 <span className="badge draft">✎ Sin publicar</span>
@@ -675,9 +682,10 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
             </div>
           )}
 
-          {/* Lo esencial arriba; lo que se toca una vez cada mil, plegado abajo. */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-            <label className="field" style={{ gridColumn: '1 / -1' }}>
+          {/* Una sola fila de campos chicos. El tipo de nivel ya no se elige acá:
+              se decidió al entrar, desde el botón del listado. */}
+          <div className="ficha">
+            <label className="field w-titulo">
               <span>Título</span>
               <input
                 className="f"
@@ -686,22 +694,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
                 onChange={(e) => patchTitulo(e.target.value)}
               />
             </label>
-            <label className="field">
-              <span>Qué se practica</span>
-              <select
-                className="f"
-                value={mode}
-                disabled={!!liveChart || !!workChart}
-                onChange={(e) => {
-                  setMode(e.target.value as ChartMode);
-                  setDirty(true);
-                }}
-              >
-                <option value="chords">Acordes</option>
-                <option value="melody">Notas (tablatura)</option>
-              </select>
-            </label>
-            <label className="field">
+            <label className="field w-medio">
               <span>Compás</span>
               <select className="f" value={song.time_sig} onChange={(e) => patch({ time_sig: e.target.value })}>
                 <option value="4/4">4/4</option>
@@ -710,8 +703,8 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
                 <option value="6/8">6/8</option>
               </select>
             </label>
-            <label className="field">
-              <span>BPM ({BPM_MIN}–{BPM_MAX})</span>
+            <label className="field w-chico">
+              <span>BPM</span>
               <input
                 className="f tnum"
                 type="number"
@@ -721,8 +714,8 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
                 onChange={(e) => patch({ bpm: Number(e.target.value) })}
               />
             </label>
-            <label className="field">
-              <span>Orden en el mapa</span>
+            <label className="field w-chico">
+              <span>Orden</span>
               <input
                 className="f tnum"
                 type="number"
@@ -731,11 +724,22 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
                 onChange={(e) => patch({ level: Number(e.target.value) })}
               />
             </label>
+            <label className="field w-chico">
+              <span>Acceso</span>
+              <div className="row" style={{ height: 32, gap: 6 }}>
+                <input
+                  className="f"
+                  type="checkbox"
+                  checked={song.is_free}
+                  onChange={(e) => patch({ is_free: e.target.checked })}
+                />
+                <span style={{ fontSize: 13 }}>{song.is_free ? 'Gratis' : 'Premium'}</span>
+              </div>
+            </label>
           </div>
 
-          <p className="muted" style={{ margin: '10px 0 0' }}>
-            Si no sabés el compás ni el tempo de la canción, dejalos como están: la IA te los dice
-            y se aplican solos.
+          <p className="muted" style={{ margin: '8px 0 0' }}>
+            Si no sabés el compás ni el tempo, dejalos: la IA te los dice y se aplican solos.
           </p>
 
           {/* El camino rápido: una sola pasada y sale el nivel entero. */}
@@ -751,10 +755,10 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
             </div>
           </div>
 
-          <details className="avanzado" style={{ marginTop: 10 }}>
+          <details className="avanzado" style={{ marginTop: 8 }}>
             <summary>▸ Más opciones</summary>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-              <label className="field">
+            <div className="ficha">
+              <label className="field w-medio">
                 <span>Identificador (slug)</span>
                 <input
                   className="f"
@@ -763,28 +767,15 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
                   onChange={(e) => patch({ slug: e.target.value })}
                 />
               </label>
-              <label className="field">
+              <label className="field w-medio">
                 <span>Artista</span>
                 <input className="f" value={song.artist ?? ''} onChange={(e) => patch({ artist: e.target.value })} />
-              </label>
-              <label className="field">
-                <span>Acceso</span>
-                <div className="row" style={{ height: 40 }}>
-                  <input
-                    className="f"
-                    type="checkbox"
-                    checked={song.is_free}
-                    onChange={(e) => patch({ is_free: e.target.checked })}
-                  />
-                  <span>{song.is_free ? 'Gratis' : 'Premium'}</span>
-                </div>
               </label>
             </div>
           </details>
         </div>
       ) : (
-        // En los demás pasos la ficha se reduce a un renglón: se completa una vez
-        // por nivel y no tiene por qué ocupar la primera pantalla siempre.
+        // En Sonido y Publicar la ficha se reduce a un renglón.
         <div className="resumen">
           <b>{song.title || 'Nivel sin título'}</b>
           <span className="dato">{mode === 'melody' ? '🎵 Notas' : '🎸 Acordes'}</span>
@@ -792,14 +783,14 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
           <span className="dato">{song.bpm} BPM</span>
           <span className="dato">{song.is_free ? 'Gratis' : 'Premium'}</span>
           <div className="grow" />
-          <CandyButton small tone="ghost" onClick={() => setPaso('datos')}>
+          <CandyButton small tone="ghost" onClick={() => setPaso('nivel')}>
             Editar datos
           </CandyButton>
         </div>
       )}
 
-      {/* ---------- 2 · MÚSICA ---------- */}
-      {paso === 'musica' && (
+      {/* ---------- La música, en el mismo paso ---------- */}
+      {paso === 'nivel' && (
         <>
           {/* El sub-nivel lo impone el juego según cómo progresa el alumno; acá solo
               se elige cuál de los dos se está editando. */}
@@ -1067,7 +1058,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
               </div>
             )}
             <div className="row" style={{ marginTop: 10 }}>
-              <span className="muted">Estructura:</span>
+              <span className="muted">Estructura (mueve el nivel entero, fondo incluido):</span>
               <select
                 className="f"
                 style={{ width: 150 }}
@@ -1080,7 +1071,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
               >
                 <option value="">Duplicar compás…</option>
                 {Array.from({ length: bars }, (_, i) => (
-                  <option key={i} value={i}>
+                  <option key={i} value={i + 1}>
                     compás {i + 1}
                   </option>
                 ))}
@@ -1352,7 +1343,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
             }
             setSelected(null);
             setImportTarget(null);
-            setPaso('musica');
+            setPaso('nivel');
             stop();
           }}
           onClose={() => {
@@ -1366,11 +1357,9 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
       {paso !== 'publicar' && (
         <Issues
           issues={
-            paso === 'datos'
-              ? songIssues
-              : paso === 'musica'
-                ? [...chartIssues, ...armoniaIssues]
-                : [...backingIssues, ...metronomoIssues]
+            paso === 'nivel'
+              ? [...songIssues, ...chartIssues, ...armoniaIssues]
+              : [...backingIssues, ...metronomoIssues]
           }
         />
       )}
