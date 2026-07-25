@@ -322,6 +322,43 @@ console.log('\n=== El sub-nivel cambia la densidad de acordes ===');
     /sin haberlos simplificado por el l[ií]mite/.test(nivelF));
 }
 
+/* Caso real: la IA se quedó sin espacio y cortó la respuesta a la mitad de la
+   palabra "ACORDES". Ese pedazo suelto generaba DOS errores, ninguno de los
+   cuales nombraba la causa: lo leía como nota, y hacía que el último compás
+   dejara de ser el último y perdiera el permiso de terminar corto. */
+console.log('\n=== Respuesta de la IA cortada por la mitad ===');
+{
+  const truncado = [
+    'BPM: 100',
+    'COMPAS: 3/4',
+    'MELODIA: | G4/1 A4/1 B4/1 | C5/2 |',
+    'ACOMP: | [C3,E3,G3]/1 r/1 r/1 | [C3,E3,G3]/2 |',
+    'ACORD',
+  ].join('\n');
+  const rt = N.parseNotation(truncado, {
+    target: 'chords', beatsPerBar: 4, knownChords: ['C', 'Am', 'F', 'G'], autoTranspose: true,
+  });
+  const errores = rt.issues.filter((i) => i.level === 'error');
+
+  check('avisa que la respuesta se cortó', rt.issues.some((i) => /se cort[oó] antes de terminar/.test(i.message)));
+  check('nombra el fragmento que quedó suelto', rt.issues.some((i) => /"ACORD"/.test(i.message)));
+  check('ya no lo confunde con una nota', !rt.issues.some((i) => /ACORD.*no es una nota/.test(i.message)));
+  check('el último compás vuelve a poder terminar corto',
+    !errores.some((i) => /compás 2 suma/.test(i.message)), JSON.stringify(errores.map((i) => i.message)));
+  check('un solo error, y es el del corte', errores.length === 1, JSON.stringify(errores.map((i) => i.message)));
+  check('lo que sí llegó se conserva',
+    rt.melodyEvents.length === 4 && rt.backingEvents.length === 6,
+    `mel=${rt.melodyEvents.length} fondo=${rt.backingEvents.length}`);
+
+  // Y lo importante: no gritar "se cortó" cuando la respuesta llegó entera.
+  const ok = N.parseNotation('| C/4 | Am/4 | F/2 G/2 | C/4',
+    { target: 'chords', beatsPerBar: 4, knownChords: ['C', 'Am', 'F', 'G'] });
+  check('no marca corte en una respuesta completa', !ok.issues.some((i) => /se cort/.test(i.message)));
+  const okMel = N.parseNotation('| G4/1 A4/1 B4/1 C5/1 |',
+    { target: 'melody', beatsPerBar: 4, knownChords: [] });
+  check('una melodía que termina en nota tampoco', !okMel.issues.some((i) => /se cort/.test(i.message)));
+}
+
 console.log('\n=== Ida y vuelta (exportar y volver a leer) ===');
 const texto = N.toNotation(r5.chordEvents, 4);
 console.log('        exportado:', texto);

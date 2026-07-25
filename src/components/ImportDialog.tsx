@@ -180,7 +180,8 @@ export function ImportDialog(props: Props) {
       setModeloUsado(modelo);
       if (cortado) {
         setErrorIA(
-          `${modelo} se quedó sin espacio y cortó la respuesta. Revisá el final: puede faltar el último tramo.`,
+          `${modelo} se quedó sin espacio y cortó la respuesta a mitad de camino. Volvé a generarla: ` +
+            'casi siempre sale entera al segundo intento. Si insiste, pedile una canción más corta.',
         );
       }
     } catch (e) {

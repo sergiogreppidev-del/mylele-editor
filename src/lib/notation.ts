@@ -282,17 +282,50 @@ function splitSections(
   return out.map((s) => ({ target: s.target, voice: s.voice, body: s.body.join('\n') }));
 }
 
+const NOMBRES_SECCION = Object.keys(SECCION_DEST);
+
+/**
+ * Cuando una IA se queda sin espacio, la respuesta no termina prolija: se corta a
+ * la mitad del nombre de la capa que venía después ("... [C3,E3,G3]/2 | ACORD").
+ *
+ * Ese pedazo suelto hacía un desastre desproporcionado. Se leía como si fuera una
+ * nota ('"ACORD" no es una nota') y, peor, hacía que el último compás dejara de
+ * ser el último y perdiera el permiso de terminar corto ('el compás 9 suma 2 y
+ * tiene que sumar 3'). Dos errores desconcertantes para una sola causa, y ninguno
+ * de los dos nombraba la causa. Así que se detecta y se dice lo que pasó.
+ */
+function recortarColaTruncada(text: string, knownChords: string[]): { text: string; issue?: Issue } {
+  const m = /(?:\s|^)([A-Za-zÁÉÍÓÚÑáéíóúñ]{3,})\s*$/.exec(text);
+  if (!m) return { text };
+
+  const frag = m[1];
+  // Podría ser música legítima: una nota (Bb5), o un acorde de nombre largo.
+  if (pitchToMidi(frag) !== null || knownChords.includes(frag)) return { text };
+  if (!NOMBRES_SECCION.some((n) => n.startsWith(frag.toLowerCase()))) return { text };
+
+  return {
+    text: text.slice(0, m.index),
+    issue: {
+      level: 'error',
+      message: `La respuesta se cortó antes de terminar: queda un "${frag}" suelto al final, que es el principio de una capa que nunca llegó. Volvé a generarla — el resto de lo que llegó está bien.`,
+    },
+  };
+}
+
 /** Convierte el texto en eventos con sus tiempos ya calculados. */
 export function parseNotation(text: string, opts: ParseOptions): ParsedNotation {
   // La cabecera se saca primero: si la IA declaró el compás, los compases se
   // verifican contra ESE, no contra el que tenga puesto el nivel.
-  const { rest, suggested } = extractHeader(stripComments(text));
+  const { rest: crudo, suggested } = extractHeader(stripComments(text));
+  const { text: rest, issue: corte } = recortarColaTruncada(crudo, opts.knownChords);
   const beatsPerBarUsed = suggested.timeSig
     ? Number(suggested.timeSig.split('/')[0]) || opts.beatsPerBar
     : opts.beatsPerBar;
 
   const vacio: ParsedNotation = {
-    chordEvents: [], melodyEvents: [], backingEvents: [], issues: [],
+    chordEvents: [], melodyEvents: [], backingEvents: [],
+    // El aviso del corte va primero: es la causa de todo lo que venga detrás.
+    issues: corte ? [corte] : [],
     appliedShift: 0, totalBeats: 0, suggested, beatsPerBarUsed,
   };
 
