@@ -326,7 +326,11 @@ export function ImportDialog(props: Props) {
                   ▶ Escuchar
                 </CandyButton>
                 {esNivelCompleto ? (
-                  <span className="muted">Reemplaza las tres capas del nivel.</span>
+                  <span className="muted">
+                    {parsed.chords.length > 0 && parsed.melody.length > 0
+                      ? 'El alumno va a tocar los acordes; la melodía pasa a sonar de fondo.'
+                      : 'Reemplaza las tres capas del nivel.'}
+                  </span>
                 ) : (
                   <>
                     <label className="row" style={{ gap: 6 }}>

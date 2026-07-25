@@ -1100,12 +1100,27 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
                 ...(r.setup.bpm ? { bpm: r.setup.bpm } : {}),
               });
             }
-            if (r.chords) setEv(r.chords);
-            if (r.melody) setMel(r.melody);
-            if (r.backing) applyBacking(r.backing);
-            // Un nivel completo puede traer melodía y acordes a la vez: el modo del
-            // nivel lo define la capa que el alumno va a tocar.
-            if (importTarget === 'nivel' && r.melody?.length && !r.chords?.length) setMode('melody');
+            if (importTarget === 'nivel') {
+              // Un nivel completo puede traer melodía Y acordes. El alumno toca una
+              // sola de las dos, así que la otra pasa a ser parte de lo que ESCUCHA:
+              // si no, la melodía se perdía al guardar sin que nadie se enterara.
+              const tocaAcordes = !!r.chords?.length;
+              const melodiaComoFondo: BackingEvent[] = tocaAcordes
+                ? (r.melody ?? []).map((n) => ({
+                    t: n.t,
+                    pitch: midiToPitch(STRING_MIDI[n.string] + n.fret),
+                    dur: n.dur,
+                  }))
+                : [];
+              setMode(tocaAcordes ? 'chords' : 'melody');
+              setEv(r.chords ?? []);
+              setMel(tocaAcordes ? [] : (r.melody ?? []));
+              applyBacking([...(r.backing ?? []), ...melodiaComoFondo]);
+            } else {
+              if (r.chords) setEv(r.chords);
+              if (r.melody) setMel(r.melody);
+              if (r.backing) applyBacking(r.backing);
+            }
             setSelected(null);
             setImportTarget(null);
             setPaso('musica');
