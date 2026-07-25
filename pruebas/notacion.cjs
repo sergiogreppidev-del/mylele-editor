@@ -502,6 +502,107 @@ console.log('\n=== Respuesta de la IA cortada por la mitad ===');
   check('una melodía que termina en nota tampoco', !okMel.issues.some((i) => /se cort/.test(i.message)));
 }
 
+/* ===================================================================
+   Control de calidad de una cancion.
+
+   Los dos defectos que mas veces hubo que corregir a mano: la armonia
+   que no es de la cancion, y el acompanamiento que suena a metronomo.
+   =================================================================== */
+console.log('\n=== La armonia calza con la melodia ===');
+{
+  const Q = require('./build/calidad.js');
+  const PCS = { C: [0, 4, 7], Am: [9, 0, 4], F: [5, 9, 0], G: [7, 11, 2] };
+  const ac = (chord, t, dur) => ({ t, chord, dur, dir: 'd' });
+  const no = (t, dur, midi) => ({ t, dur, midi });
+
+  // C mayor (C E G) con una melodia que canta C, E, G: cierra.
+  const bien = Q.verificarArmonia([ac('C', 0, 4)], [no(0, 2, 60), no(2, 2, 64)], PCS);
+  check('un acorde que contiene la melodia no da aviso', bien.length === 0);
+
+  // El mismo compas con un F: no comparte NINGUNA nota con lo que suena.
+  const mal = Q.verificarArmonia([ac('F', 0, 4)], [no(0, 2, 62), no(2, 2, 71)], PCS);
+  check('detecta el acorde que no contiene ninguna nota', mal.length === 1 && mal[0].ninguna === true);
+  check('dice cuales son las notas que sobran', mal[0].ajenas.sort().join() === 'B,D');
+
+  // Nota de paso corta: normal, no tiene que molestar.
+  const paso = Q.verificarArmonia([ac('C', 0, 4)], [no(0, 3.5, 60), no(3.5, 0.5, 62)], PCS);
+  check('una nota de paso corta no da aviso', paso.length === 0);
+
+  // Mayoria ajena: aviso mas suave, no error.
+  const mayoria = Q.verificarArmonia([ac('C', 0, 4)], [no(0, 3, 62), no(3, 1, 60)], PCS);
+  check('si la mayoria queda afuera, avisa sin decir "ninguna"',
+    mayoria.length === 1 && mayoria[0].ninguna === false);
+
+  // Sin melodia no se puede juzgar nada.
+  check('sin melodia no inventa avisos', Q.verificarArmonia([ac('C', 0, 4)], [], PCS).length === 0);
+
+  // El indice sirve para marcarlo en pantalla.
+  const varios = Q.verificarArmonia([ac('C', 0, 4), ac('F', 4, 4)], [no(0, 4, 60), no(4, 4, 71)], PCS);
+  check('devuelve el indice del acorde que falla', varios.length === 1 && varios[0].index === 1);
+
+  // Los avisos ubican el compas para poder ir a mirarlo.
+  const avisos = Q.avisosDeArmonia(varios, '4/4', 0);
+  check('el aviso dice en que compas', /compás 2/.test(avisos[0].message), avisos[0].message);
+  check('no contener ninguna nota es error, no aviso', avisos[0].level === 'error');
+  check('la anacrusa se nombra como tal',
+    /anacrusa/.test(Q.avisosDeArmonia(Q.verificarArmonia([ac('F', 0, 1)], [no(0, 1, 71)], PCS), '4/4', 1)[0].message));
+
+  // De donde sale la melodia: capa jugable o fondo marcado como 'lead'.
+  const desdeFondo = Q.melodiaDelNivel([], [
+    { t: 0, pitch: 'C4', dur: 1, v: 'lead' },
+    { t: 0, pitch: 'C2', dur: 1, v: 'bass' },
+  ]);
+  check('en un nivel de acordes la melodia sale del fondo (lead)',
+    desdeFondo.length === 1 && desdeFondo[0].midi === 60);
+  const desdeTab = Q.melodiaDelNivel([{ t: 0, string: 'C', fret: 0, dur: 1 }], []);
+  check('en un nivel de notas sale de la tablatura', desdeTab.length === 1 && desdeTab[0].midi === 60);
+  check('el bajo nunca se confunde con la melodia', desdeFondo.every((n) => n.midi === 60));
+}
+
+console.log('\n=== Musica o metronomo ===');
+{
+  const Q = require('./build/calidad.js');
+  const n = (t, dur, pitch, v) => ({ t, dur, pitch, v });
+
+  // 8 compases identicos: exactamente el defecto que hubo que corregir a mano.
+  const clavado = [];
+  for (let c = 0; c < 8; c++) {
+    clavado.push(n(c * 4, 1, 'C2', 'bass'));
+    clavado.push(n(c * 4 + 1, 1, 'E3', 'acomp'));
+    clavado.push(n(c * 4 + 2, 1, 'G3', 'acomp'));
+    clavado.push(n(c * 4 + 3, 1, 'E3', 'acomp'));
+  }
+  const avC = Q.detectarMetronomo(clavado, '4/4', 0);
+  check('detecta el acompanamiento que repite el mismo ritmo',
+    avC.some((i) => /mismo ritmo/.test(i.message)), JSON.stringify(avC.map((i) => i.message)));
+
+  // Bajo solo en el tiempo 1: el otro sintoma clasico.
+  const soloEnElUno = [];
+  for (let c = 0; c < 6; c++) {
+    soloEnElUno.push(n(c * 4, 1, 'C2', 'bass'));
+    soloEnElUno.push(n(c * 4 + (c % 2 ? 1 : 2), 1, 'E3', 'acomp'));
+  }
+  check('avisa que el bajo no se mueve',
+    Q.detectarMetronomo(soloEnElUno, '4/4', 0).some((i) => /bajo toca solamente/.test(i.message)));
+
+  // Un arreglo con movimiento no tiene que molestar.
+  const vivo = [];
+  const patrones = [[0, 1.5, 2.5], [0, 1, 2, 3], [0.5, 2], [0, 1.5, 3]];
+  for (let c = 0; c < 8; c++) {
+    for (const p of patrones[c % 4]) vivo.push(n(c * 4 + p, 0.5, 'E3', 'acomp'));
+    vivo.push(n(c * 4 + (c % 3), 1, 'C2', 'bass'));
+  }
+  check('un arreglo con movimiento no da aviso de metronomo',
+    !Q.detectarMetronomo(vivo, '4/4', 0).some((i) => /mismo ritmo/.test(i.message)),
+    JSON.stringify(Q.detectarMetronomo(vivo, '4/4', 0).map((i) => i.message)));
+
+  check('con pocos compases no saca conclusiones',
+    Q.detectarMetronomo(clavado.slice(0, 8), '4/4', 0).length === 0);
+  check('sin acompanamiento no dice nada', Q.detectarMetronomo([], '4/4', 0).length === 0);
+  check('la melodia no cuenta como acompanamiento',
+    Q.detectarMetronomo(clavado.map((x) => ({ ...x, v: 'lead' })), '4/4', 0).length === 0);
+}
+
 console.log('\n=== Ida y vuelta (exportar y volver a leer) ===');
 const texto = N.toNotation(r5.chordEvents, 4);
 console.log('        exportado:', texto);

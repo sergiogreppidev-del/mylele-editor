@@ -14,6 +14,7 @@ import { LevelOverview, largoDeCapas } from '../components/LevelOverview';
 import { ImportDialog } from '../components/ImportDialog';
 import { DificultadPanel } from '../components/DificultadPanel';
 import { acordesPara, medirAcordes, medirMelodia, verificarPerfil } from '../lib/dificultad';
+import { avisosDeArmonia, detectarMetronomo, melodiaDelNivel, verificarArmonia } from '../lib/calidad';
 import type { Digitaciones } from '../lib/dificultad';
 import { STRING_MIDI, midiToPitch, validateBacking } from '../lib/notation';
 import type { ImportTarget } from '../lib/aiPrompt';
@@ -88,6 +89,14 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
   const [flash, setFlash] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
 
+  /**
+   * Deshacer. Guarda los últimos estados de lo que se edita, en memoria: no toca
+   * la base. Sin esto, "Vaciar chart", "Reemplazar todo" al importar o un arrastre
+   * que se fue de mano eran irreversibles, que es lo que más frena a probar cosas.
+   */
+  const historia = useRef<{ events: ChordEvent[]; melody: MelodyEvent[]; backing: BackingEvent[] }[]>([]);
+  const ultimoGuardado = useRef(0);
+
   const audio = useRef<PreviewAudio | null>(null);
   if (!audio.current) audio.current = new PreviewAudio();
   // Al salir de la pantalla sí se cierra el motor de audio; entre reproducciones no.
@@ -105,6 +114,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     setBackingNotes(workingChart(row, BACKING_MODE, 'facil')?.backing ?? []);
     setSelected(null);
     setDirty(false);
+    historia.current = [];
   }
 
   /* ---------- carga ---------- */
@@ -194,6 +204,26 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     [metricas, dificultad, digitaciones],
   );
 
+  /**
+   * ¿La armonía es de esta canción? La melodía puede estar en la capa jugable
+   * (nivel de notas) o dentro del fondo marcada como 'lead' (nivel de acordes).
+   */
+  const choques = useMemo(() => {
+    if (mode !== 'chords') return [];
+    const pcs: Record<string, number[]> = {};
+    chords.forEach((c) => (pcs[c.id] = c.pitch_classes));
+    return verificarArmonia(events, melodiaDelNivel(melody, backingNotes), pcs);
+  }, [mode, events, melody, backingNotes, chords]);
+
+  const armoniaIssues = useMemo(
+    () => avisosDeArmonia(choques, song.time_sig, song.pickup_beats),
+    [choques, song.time_sig, song.pickup_beats],
+  );
+  const metronomoIssues = useMemo(
+    () => detectarMetronomo(backingNotes, song.time_sig, song.pickup_beats),
+    [backingNotes, song.time_sig, song.pickup_beats],
+  );
+
   const chordPcs: ChordPcs = useMemo(() => {
     const map: ChordPcs = {};
     chords.forEach((c) => (map[c.id] = c.pitch_classes));
@@ -206,13 +236,39 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     [playable, mode, chords, song.time_sig],
   );
   const backingIssues = useMemo(() => validateBacking(backingNotes), [backingNotes]);
-  const allIssues = [...songIssues, ...chartIssues, ...backingIssues, ...perfilIssues];
+  const allIssues = [...songIssues, ...chartIssues, ...backingIssues, ...perfilIssues,
+                     ...armoniaIssues, ...metronomoIssues];
   const blocked = hasErrors(allIssues);
 
   const liveChart: ChartRow | null = loaded ? publishedChart(loaded, mode, dificultad) : null;
   const workChart: ChartRow | null = loaded ? workingChart(loaded, mode, dificultad) : null;
   const hasUnpublishedDraft = !!workChart && !workChart.published;
   const fichaEnBorrador = !!loaded && hasSongDraft(loaded);
+
+  /**
+   * Anota el estado ANTERIOR antes de cambiarlo. Durante un arrastre esto se
+   * llamaría en cada movimiento del mouse, así que se anota solo si pasó medio
+   * segundo: queda el estado previo al gesto y no los cien pasos intermedios.
+   */
+  function anotar() {
+    const ahora = Date.now();
+    if (ahora - ultimoGuardado.current < 500) return;
+    ultimoGuardado.current = ahora;
+    historia.current.push({ events, melody, backing: backingNotes });
+    if (historia.current.length > 30) historia.current.shift();
+  }
+
+  function deshacer() {
+    const previo = historia.current.pop();
+    if (!previo) return;
+    ultimoGuardado.current = 0;
+    setEvents(previo.events);
+    setMelody(previo.melody);
+    setBackingNotes(previo.backing);
+    setSelected(null);
+    setDirty(true);
+    setFlash('↩ Deshecho.');
+  }
 
   function patch(next: Partial<Song>) {
     setSong((s) => ({ ...s, ...next }));
@@ -267,10 +323,12 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
   ];
   const pasoIdx = PASOS.findIndex((p) => p.id === paso);
   function setEv(next: ChordEvent[]) {
+    anotar();
     setEvents(next);
     setDirty(true);
   }
   function setMel(next: MelodyEvent[]) {
+    anotar();
     setMelody(next);
     setDirty(true);
   }
@@ -280,9 +338,26 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     else setEv(next as ChordEvent[]);
   }
   function applyBacking(next: BackingEvent[]) {
+    anotar();
     setBackingNotes(next);
     setDirty(true);
   }
+
+  // Ctrl+Z va en su propio efecto: el de abajo sale temprano si no hay nada
+  // seleccionado, y deshacer tiene que andar igual.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        deshacer();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ---------- atajos ---------- */
   useEffect(() => {
@@ -951,6 +1026,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
                 })()}
               </div>
               <LevelOverview
+                choques={choques.map((c) => c.index)}
                 chords={events}
                 melody={melody}
                 backing={backingNotes}
@@ -1282,7 +1358,11 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
       {paso !== 'publicar' && (
         <Issues
           issues={
-            paso === 'datos' ? songIssues : paso === 'musica' ? chartIssues : backingIssues
+            paso === 'datos'
+              ? songIssues
+              : paso === 'musica'
+                ? [...chartIssues, ...armoniaIssues]
+                : [...backingIssues, ...metronomoIssues]
           }
         />
       )}
@@ -1315,6 +1395,9 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
             ))}
           </select>
         </label>
+        <CandyButton tone="ghost" small onClick={deshacer} title="Ctrl+Z">
+          &#8617; Deshacer
+        </CandyButton>
         <CandyButton
           tone="sun"
           small

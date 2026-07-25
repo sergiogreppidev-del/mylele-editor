@@ -58,6 +58,8 @@ export function ImportDialog(props: Props) {
   const [generando, setGenerando] = useState(false);
   const [errorIA, setErrorIA] = useState<string | null>(null);
   const [modeloUsado, setModeloUsado] = useState<string | null>(null);
+  /** La última respuesta llegó cortada por falta de espacio. Se puede continuar. */
+  const [cortada, setCortada] = useState(false);
 
   /** Generar el nivel entero reemplaza las tres capas: agregar al final no aplica. */
   const esNivelCompleto = target === 'nivel';
@@ -187,6 +189,7 @@ export function ImportDialog(props: Props) {
     setErrorIA(null);
     try {
       const { texto, cortado, modelo } = await generarConGemini(armarPrompt());
+      setCortada(cortado);
       // Gemini a veces envuelve la respuesta en un bloque de código igual.
       setText(texto.replace(/^```[a-z]*\n?/i, '').replace(/```\s*$/, '').trim());
       setModeloUsado(modelo);
@@ -202,6 +205,60 @@ export function ImportDialog(props: Props) {
       setGenerando(false);
     }
   }
+
+  /**
+   * Continuar una respuesta que se cortó. En vez de regenerar todo —y arriesgarse
+   * a que la segunda versión no calce con la primera— se le manda lo que ya
+   * escribió y se le pide ÚNICAMENTE los renglones que faltan.
+   */
+  async function continuar() {
+    const yaEsta = text.trim();
+    if (!yaEsta) return;
+    setGenerando(true);
+    setErrorIA(null);
+    try {
+      const faltan = capasQueFaltan();
+      const { texto, cortado, modelo } = await generarConGemini(
+        [
+          armarPrompt(),
+          '',
+          '========================================',
+          'ESTO YA LO ESCRIBISTE. No lo repitas ni lo cambies:',
+          '',
+          yaEsta,
+          '',
+          faltan.length
+            ? `FALTA: ${faltan.join(' y ')}. Escribí ÚNICAMENTE ${faltan.length === 1 ? 'ese renglón' : 'esos renglones'}, con el nombre de la capa adelante, alineados compás por compás con lo de arriba.`
+            : 'Se cortó antes de terminar. Escribí ÚNICAMENTE lo que falta, desde donde quedó, con el nombre de la capa adelante.',
+          'No repitas los renglones que ya están. No expliques nada.',
+        ].join('\n'),
+      );
+      const limpio = texto.replace(/^```[a-z]*\n?/i, '').replace(/```\s*$/, '').trim();
+      setText((t) => `${t.trim()}\n${limpio}`);
+      setModeloUsado(modelo);
+      setCortada(cortado);
+    } catch (e) {
+      setErrorIA(friendlyError(e));
+    } finally {
+      setGenerando(false);
+    }
+  }
+
+  /** Qué capas de un nivel completo no llegaron todavía. */
+  function capasQueFaltan(): string[] {
+    if (!esNivelCompleto || !parsed) return [];
+    return [
+      parsed.backing.length === 0 && 'BAJO y ACOMP',
+      parsed.melody.length === 0 && 'MELODIA',
+      nivelPideAcordes && parsed.chords.length === 0 && 'ACORDES',
+    ].filter(Boolean) as string[];
+  }
+
+  /** El parser reconoce la cola que queda cuando la respuesta se corta a la mitad. */
+  const seCorto =
+    cortada ||
+    (parsed?.issues.some((i) => /se cort[oó] antes de terminar/.test(i.message)) ?? false) ||
+    (esNivelCompleto && !!parsed && capasQueFaltan().length > 0);
 
   return (
     <div className="overlay" onClick={props.onClose}>
@@ -355,6 +412,21 @@ export function ImportDialog(props: Props) {
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
+          {seCorto && text.trim() && (
+            <div className="notice warn" style={{ marginTop: 8 }}>
+              <div className="row">
+                <span className="grow">
+                  Falta parte de la respuesta
+                  {capasQueFaltan().length > 0 && <> ({capasQueFaltan().join(' y ')})</>}. Podés pedirle
+                  que siga desde donde quedó en vez de generar todo de nuevo — así lo que ya llegó no
+                  cambia.
+                </span>
+                <CandyButton small tone="sun" disabled={generando} onClick={() => void continuar()}>
+                  {generando ? '⏳' : '↳ Continuar'}
+                </CandyButton>
+              </div>
+            </div>
+          )}
           <p className="muted" style={{ margin: '6px 0 0' }}>
             Acepta la notación de texto o el JSON que genera este mismo editor.
           </p>

@@ -307,6 +307,14 @@ details.avanzado[open] > summary { margin-bottom: 10px; }
   font-family: 'Titan One', cursive; font-weight: 400; font-size: 12px; color: #fff;
   text-shadow: 0 1px 0 rgba(0,0,0,.25); overflow: hidden; border: 2px solid var(--ink);
 }
+/* Acorde cuya armonía no cierra con la melodía: se ve sin tener que escuchar. */
+.ov-chord.choca { outline: 3px solid var(--melon); outline-offset: 1px; }
+.ov-chord.choca::after {
+  content: '!'; position: absolute; top: -7px; right: -5px;
+  width: 15px; height: 15px; border-radius: 50%; background: var(--melon);
+  border: 2px solid var(--ink); color: #fff; font-family: 'Baloo 2', sans-serif;
+  font-size: 10px; font-weight: 800; display: grid; place-items: center; line-height: 1;
+}
 .ov-note { position: absolute; height: 6px; border-radius: 3px; border: 1.5px solid var(--ink); }
 .ov-back { position: absolute; height: 5px; border-radius: 3px; background: var(--grape); opacity: .9; }
 

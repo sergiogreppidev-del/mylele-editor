@@ -13,6 +13,8 @@ interface Props {
   bars: number;
   cursorBeat: number | null;
   pickup: number;
+  /** Índices de acordes cuya armonía no cierra con la melodía. Se marcan en rojo. */
+  choques?: number[];
 }
 
 const H_ACORDES = 30;
@@ -26,7 +28,10 @@ const H_FONDO = 52;
  * no calza con la melodía en el compás 7 no lo es. Esta vista existe para que
  * ese desfasaje se vea de un vistazo en vez de tener que escuchar todo.
  */
-export function LevelOverview({ chords, melody, backing, timeSig, pxPerBeat, bars, cursorBeat, pickup }: Props) {
+export function LevelOverview({
+  chords, melody, backing, timeSig, pxPerBeat, bars, cursorBeat, pickup, choques = [],
+}: Props) {
+  const marcados = new Set(choques);
   const bpb = beatsPerBar(timeSig);
   const totalBeats = pickup + bars * bpb;
   const width = totalBeats * pxPerBeat;
@@ -87,13 +92,16 @@ export function LevelOverview({ chords, melody, backing, timeSig, pxPerBeat, bar
               return (
                 <div
                   key={'c' + i}
-                  className="ov-chord"
+                  className={'ov-chord' + (marcados.has(i) ? ' choca' : '')}
                   style={{
                     left: e.t * pxPerBeat,
                     width: Math.max(e.dur * pxPerBeat - 2, 16),
                     background: col.bg,
                   }}
-                  title={`${e.chord} · beat ${e.t}`}
+                  title={
+                    `${e.chord} · beat ${e.t}` +
+                    (marcados.has(i) ? ' · la melodía no encaja en este acorde' : '')
+                  }
                 >
                   {e.chord}
                 </div>
