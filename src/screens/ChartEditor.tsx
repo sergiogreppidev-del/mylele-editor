@@ -19,8 +19,8 @@ import type {
   BackingEvent, ChartEvent, ChartMode, ChordEvent, MelodyEvent, Song, StrumPattern,
 } from '../lib/chartFormat';
 import {
-  EMPTY_SONG, discardDraft, getSong, insertSong, publishChart, publishedChart,
-  saveDraft, songMode, updateSong, workingChart,
+  EMPTY_SONG, backingUrl, deleteBacking, discardDraft, getSong, insertSong, publishChart,
+  publishedChart, saveDraft, songMode, updateSong, uploadBacking, workingChart,
 } from '../lib/db';
 import type { ChartRow, ChordRow, SongRow } from '../lib/db';
 import { friendlyError } from '../lib/supabase';
@@ -63,6 +63,8 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   const [minBars, setMinBars] = useState(4);
   const [defaultDur, setDefaultDur] = useState(4);
 
+  const [uploading, setUploading] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
   const [cursorBeat, setCursorBeat] = useState<number | null>(null);
   const [metronome, setMetronome] = useState(true);
   const [backing, setBacking] = useState(true);
@@ -248,6 +250,50 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
     setEv(events.map((e) => ({ ...e, dir: dirForBeat(p, e.t % bpb) })));
   }
 
+  /* ---------- acompañamiento grabado ---------- */
+  const recordedUrl = song.audio_path ? backingUrl(song.audio_path) : null;
+
+  // Se descarga y decodifica apenas se conoce la URL: para juzgar el calce, la
+  // grabación tiene que arrancar en el mismo reloj que el metrónomo.
+  useEffect(() => {
+    setAudioReady(false);
+    if (!recordedUrl) return;
+    let alive = true;
+    void audio.current
+      ?.loadRecorded(recordedUrl)
+      .then(() => alive && setAudioReady(true))
+      .catch((e) => alive && setError(friendlyError(e)));
+    return () => {
+      alive = false;
+    };
+  }, [recordedUrl]);
+
+  async function handleUpload(file: File) {
+    if (!canEdit) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const anterior = song.audio_path;
+      const path = await uploadBacking(file, song.slug);
+      patch({ audio_path: path });
+      // El archivo viejo se borra recién ahora: si la subida falla, no se pierde nada.
+      if (anterior) await deleteBacking(anterior).catch(() => {});
+      setFlash('Audio subido. Dale a Reproducir y fijate si entra en el tiempo 1.');
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleRemoveAudio() {
+    if (!song.audio_path) return;
+    if (!window.confirm('¿Sacar el acompañamiento grabado? El nivel vuelve al sintetizado.')) return;
+    const path = song.audio_path;
+    patch({ audio_path: null, audio_offset_s: 0 });
+    await deleteBacking(path).catch(() => {});
+  }
+
   /* ---------- reproducción ---------- */
   function play(overridePlayable?: ChartEvent[], overrideBacking?: BackingEvent[]) {
     const evs = overridePlayable ?? playable;
@@ -260,6 +306,8 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
       bpm: song.bpm,
       beatsPerBar: bpb,
       chordPcs,
+      recordedUrl: audioReady ? recordedUrl : null,
+      recordedOffset: song.audio_offset_s,
       metronome,
       backing,
       onBeat: (b) => setCursorBeat(b),
@@ -726,6 +774,76 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
                   {backingNotes.length} notas · {tidy(chartLengthBeats(backingNotes))} tiempos
                 </span>
               </>
+            )}
+          </div>
+
+          {/* ---------- acompañamiento grabado ---------- */}
+          <div className="card">
+            <div className="row" style={{ marginBottom: 10 }}>
+              <div className="section-title grow">Acompañamiento grabado (reemplaza al sintetizado)</div>
+              {song.audio_path && (
+                <CandyButton small tone="melon" onClick={() => void handleRemoveAudio()} disabled={!canEdit}>
+                  Quitar
+                </CandyButton>
+              )}
+            </div>
+
+            {song.audio_path ? (
+              <div className="col">
+                <div className="row">
+                  <span className="badge live">♪ {audioReady ? 'Listo' : 'Cargando…'}</span>
+                  <span className="muted grow" style={{ wordBreak: 'break-all' }}>
+                    {song.audio_path}
+                  </span>
+                </div>
+                <div className="row">
+                  <span className="muted">Calce:</span>
+                  <CandyButton small tone="ghost" onClick={() => patch({ audio_offset_s: tidy(song.audio_offset_s - 0.05) })}>
+                    ◀ 50 ms
+                  </CandyButton>
+                  <input
+                    className="f tnum"
+                    style={{ width: 96 }}
+                    type="number"
+                    step={0.01}
+                    value={song.audio_offset_s}
+                    onChange={(e) => patch({ audio_offset_s: Number(e.target.value) })}
+                  />
+                  <span className="muted">seg</span>
+                  <CandyButton small tone="ghost" onClick={() => patch({ audio_offset_s: tidy(song.audio_offset_s + 0.05) })}>
+                    50 ms ▶
+                  </CandyButton>
+                  <CandyButton small tone="ghost" onClick={() => patch({ audio_offset_s: 0 })}>
+                    A cero
+                  </CandyButton>
+                </div>
+                <p className="muted" style={{ margin: 0 }}>
+                  Si la música entra <b>tarde</b>, bajá el número; si entra <b>temprano</b>, subilo.
+                  Escuchá con el metrónomo prendido: el primer golpe de la grabación tiene que caer
+                  junto al primer clic después de la cuenta de entrada.
+                </p>
+              </div>
+            ) : (
+              <div className="col">
+                <label className="row" style={{ gap: 10 }}>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    disabled={!canEdit || uploading}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleUpload(f);
+                      e.target.value = '';
+                    }}
+                  />
+                  {uploading && <span className="muted">Subiendo…</span>}
+                </label>
+                <p className="muted" style={{ margin: 0 }}>
+                  Subí un audio (mp3, m4a, wav… hasta 20&nbsp;MB) y reemplaza al acompañamiento sintetizado.
+                  Tiene que estar a <b>{song.bpm} BPM</b> y arrancar en el <b>tiempo 1</b>, sin cuenta de
+                  entrada grabada. Si no calza justo, se ajusta con el control de calce.
+                </p>
+              </div>
             )}
           </div>
 

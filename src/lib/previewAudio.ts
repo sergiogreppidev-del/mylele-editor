@@ -24,6 +24,10 @@ export interface PlayOptions {
   melodyNotes?: MelodyEvent[];
   /** Melodía de acompañamiento importada (la toca la app, no el alumno). */
   backingNotes?: BackingEvent[];
+  /** Acompañamiento GRABADO. Si viene, reemplaza a todo lo sintetizado. */
+  recordedUrl?: string | null;
+  /** Corrimiento en segundos de la grabación respecto del tiempo 1. */
+  recordedOffset?: number;
   countInBars?: number;
   metronome?: boolean;
   backing?: boolean;
@@ -38,6 +42,25 @@ export class PreviewAudio {
   private raf = 0;
   private endTimer: number | null = null;
   private playing = false;
+  private source: AudioBufferSourceNode | null = null;
+  /** Los archivos decodificados se guardan por URL: decodificar tarda y se repite mucho. */
+  private static cache = new Map<string, AudioBuffer>();
+
+  /**
+   * Descarga y decodifica la grabación. Hay que hacerlo antes de reproducir, porque
+   * el arranque tiene que caer en el mismo reloj que el metrónomo: si se decodifica
+   * sobre la marcha, la música entra corrida y no se puede juzgar el calce.
+   */
+  async loadRecorded(url: string): Promise<AudioBuffer> {
+    const hit = PreviewAudio.cache.get(url);
+    if (hit) return hit;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`No se pudo descargar el audio (${res.status}).`);
+    const bytes = await res.arrayBuffer();
+    const buf = await this.ensureCtx().decodeAudioData(bytes);
+    PreviewAudio.cache.set(url, buf);
+    return buf;
+  }
 
   get isPlaying(): boolean {
     return this.playing;
@@ -173,9 +196,12 @@ export class PreviewAudio {
     const ctx = this.ensureCtx();
     const {
       events, bpm, beatsPerBar, chordPcs, backingNotes = [], melodyNotes = [],
+      recordedUrl = null, recordedOffset = 0,
       countInBars = 1, metronome = true, backing = true,
       onBeat, onEnd,
     } = opts;
+    // La grabación tiene que estar ya decodificada (loadRecorded) para arrancar a tiempo.
+    const recorded = recordedUrl ? PreviewAudio.cache.get(recordedUrl) ?? null : null;
 
     const beatDur = 60 / bpm;
     const countInBeats = countInBars * beatsPerBar;
@@ -189,11 +215,21 @@ export class PreviewAudio {
     const totalBeats = countInBeats + Math.ceil(lastBeat);
 
     if (metronome) {
-      for (let i = 0; i < totalBeats; i++) {
+      // Igual que en la app de alumnos: con grabación, el clic marca solo la entrada.
+      const hasta = recorded ? countInBeats : totalBeats;
+      for (let i = 0; i < hasta; i++) {
         this.scheduleClick(startTime + i * beatDur, i % beatsPerBar === 0);
       }
     }
-    if (backing) {
+    if (recorded) {
+      const src = ctx.createBufferSource();
+      src.buffer = recorded;
+      src.connect(this.master!);
+      const when = startTime + countInBeats * beatDur + recordedOffset;
+      if (when >= ctx.currentTime) src.start(when);
+      else src.start(ctx.currentTime, ctx.currentTime - when); // ya pasó: entra por el medio
+      this.source = src;
+    } else if (backing) {
       this.scheduleBacking(events, startTime, countInBeats, beatDur, chordPcs);
       this.scheduleStrums(events, startTime, countInBeats, beatDur, chordPcs);
       this.scheduleBackingMelody(backingNotes, startTime, countInBeats, beatDur);
@@ -221,6 +257,14 @@ export class PreviewAudio {
 
   stop() {
     this.playing = false;
+    if (this.source) {
+      try {
+        this.source.stop();
+      } catch {
+        /* ya estaba detenida */
+      }
+      this.source = null;
+    }
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
     if (this.endTimer !== null) window.clearTimeout(this.endTimer);

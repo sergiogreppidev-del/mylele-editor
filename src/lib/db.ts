@@ -42,9 +42,36 @@ export const EMPTY_SONG: Song = {
   time_sig: '4/4',
   tuning: 'GCEA',
   audio_path: null,
+  audio_offset_s: 0,
   is_free: true,
   duration_s: null,
 };
+
+/* ---------------- Acompañamiento grabado (Storage) ---------------- */
+
+const BUCKET = 'backing';
+
+export function backingUrl(path: string): string {
+  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+/** Sube el archivo con un nombre derivado del slug. Devuelve la ruta a guardar en songs. */
+export async function uploadBacking(file: File, slug: string): Promise<string> {
+  const ext = (file.name.split('.').pop() || 'mp3').toLowerCase();
+  // El sufijo con la hora evita que quede cacheado el archivo anterior al reemplazarlo.
+  const path = `${slug || 'nivel'}-${Date.now()}.${ext}`;
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
+    contentType: file.type || 'audio/mpeg',
+    upsert: false,
+  });
+  if (error) throw error;
+  return path;
+}
+
+export async function deleteBacking(path: string): Promise<void> {
+  const { error } = await supabase.storage.from(BUCKET).remove([path]);
+  if (error) throw error;
+}
 
 /* ---------------- Acordes ---------------- */
 
@@ -118,6 +145,7 @@ function normalizeSongRow(raw: unknown): SongRow {
   return {
     ...r,
     bpm: Number(r.bpm),
+    audio_offset_s: Number(r.audio_offset_s) || 0,
     charts: (r.charts ?? []).map((c) => ({
       ...c,
       // El mismo campo jsonb guarda dos formas distintas según el modo.
@@ -156,6 +184,7 @@ function stripSong(s: Song) {
     time_sig: s.time_sig,
     tuning: s.tuning,
     audio_path: s.audio_path || null,
+    audio_offset_s: Number(s.audio_offset_s) || 0,
     is_free: s.is_free,
     duration_s: s.duration_s,
   };

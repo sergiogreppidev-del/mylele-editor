@@ -130,6 +130,25 @@ eligiendo la posición más cómoda.
 
 ---
 
+## Acompañamiento grabado
+
+En vez del acompañamiento sintetizado, un nivel puede tener un **audio grabado**. Se sube desde
+la ficha del nivel y reemplaza a todo lo sintetizado.
+
+Dos condiciones para que calce:
+
+1. La grabación está al **BPM del nivel**.
+2. Arranca en el **tiempo 1**, sin cuenta de entrada grabada (la cuenta la pone la app).
+
+Como ninguna grabación arranca exacta, está el control de **calce**: si la música entra tarde
+bajás el número, si entra temprano lo subís. Escuchá con el metrónomo prendido — el primer
+golpe de la grabación tiene que caer junto al primer clic después de la cuenta de entrada.
+
+> Los datos del nivel (título, BPM, audio) viven en la tabla `songs`, que **no tiene borrador**:
+> se guardan en vivo apenas apretás Guardar. El borrador cubre la partitura, no la ficha.
+
+---
+
 ## Acordes
 
 La pestaña **🎸 Acordes** es el ABM del catálogo: alta, edición y borrado con el diagrama de

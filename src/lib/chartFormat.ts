@@ -61,7 +61,10 @@ export interface Song {
   bpm: number;
   time_sig: string;
   tuning: string;
+  /** Ruta dentro del bucket `backing` de Storage. null = se sintetiza. */
   audio_path: string | null;
+  /** Corrimiento en segundos para calzar la grabación con el tiempo 1. Puede ser negativo. */
+  audio_offset_s: number;
   is_free: boolean;
   duration_s: number | null;
 }
