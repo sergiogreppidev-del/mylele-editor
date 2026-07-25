@@ -7,6 +7,21 @@
    playSynth / chordFreqs / scheduleBacking / scheduleClick están PORTADOS
    de game.js:158-219 de la app de alumnos (el groove reggae), para que lo
    que se escucha en el editor sea lo mismo que va a escuchar el alumno.
+
+   TRES COSAS QUE ESTABAN MAL Y SE ARREGLARON ACÁ:
+
+   1. Con acompañamiento grabado, el rasgueo del chart quedaba mudo — pero
+      las notas sueltas seguían sonando. O sea que en un nivel de notas te
+      escuchabas encima de la grabación y en uno de acordes no, que es justo
+      cuando más falta hace comprobar si el acorde calza.
+   2. La casilla "Acompañamiento" apagaba también el chart propio, o sea lo
+      contrario de lo que promete su nombre.
+   3. Cada "parar" cerraba el motor de audio del navegador y el próximo play
+      abría uno nuevo. Los navegadores limitan cuántos se pueden abrir, y los
+      audios ya decodificados quedaban colgando de un motor cerrado.
+
+   La regla que ordena todo: LO QUE SE ESTÁ EDITANDO SUENA SIEMPRE. Las
+   casillas solo apagan lo que lo acompaña.
    =================================================================== */
 
 import type { BackingEvent, ChordEvent, MelodyEvent } from './chartFormat';
@@ -26,12 +41,15 @@ export interface PlayOptions {
   backingNotes?: BackingEvent[];
   /** Anacrusa en tiempos: corre el acento del metrónomo al tiempo fuerte real. */
   pickup?: number;
-  /** Acompañamiento GRABADO. Si viene, reemplaza a todo lo sintetizado. */
+  /** Acompañamiento GRABADO. Si viene, reemplaza a lo sintetizado (no al chart). */
   recordedUrl?: string | null;
   /** Corrimiento en segundos de la grabación respecto del tiempo 1. */
   recordedOffset?: number;
+  /** Desde qué tiempo del chart arrancar. Verificar el final no puede costar toda la canción. */
+  desdeBeat?: number;
   countInBars?: number;
   metronome?: boolean;
+  /** Solo el acompañamiento. El chart que se está editando suena igual. */
   backing?: boolean;
   /** beat actual (negativo durante la cuenta de entrada) */
   onBeat?: (beat: number) => void;
@@ -39,14 +57,16 @@ export interface PlayOptions {
 }
 
 export class PreviewAudio {
+  /** UN solo motor de audio para toda la vida del editor. Ver el comentario de arriba. */
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private raf = 0;
   private endTimer: number | null = null;
   private playing = false;
-  private source: AudioBufferSourceNode | null = null;
-  /** Los archivos decodificados se guardan por URL: decodificar tarda y se repite mucho. */
-  private static cache = new Map<string, AudioBuffer>();
+  /** Todo lo que se programó en esta pasada, para poder cortarlo sin cerrar el motor. */
+  private nodos: AudioScheduledSourceNode[] = [];
+  /** Los archivos decodificados pertenecen a ESTE motor, así que la caché va por instancia. */
+  private cache = new Map<string, AudioBuffer>();
 
   /**
    * Descarga y decodifica la grabación. Hay que hacerlo antes de reproducir, porque
@@ -54,13 +74,13 @@ export class PreviewAudio {
    * sobre la marcha, la música entra corrida y no se puede juzgar el calce.
    */
   async loadRecorded(url: string): Promise<AudioBuffer> {
-    const hit = PreviewAudio.cache.get(url);
+    const hit = this.cache.get(url);
     if (hit) return hit;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`No se pudo descargar el audio (${res.status}).`);
     const bytes = await res.arrayBuffer();
     const buf = await this.ensureCtx().decodeAudioData(bytes);
-    PreviewAudio.cache.set(url, buf);
+    this.cache.set(url, buf);
     return buf;
   }
 
@@ -80,6 +100,12 @@ export class PreviewAudio {
     return this.ctx;
   }
 
+  /** Registra la fuente para poder cortarla en `stop()` sin cerrar el motor. */
+  private registrar<T extends AudioScheduledSourceNode>(n: T): T {
+    this.nodos.push(n);
+    return n;
+  }
+
   // --- clic del metrónomo (programado con precisión) — game.js:158 ---
   private scheduleClick(time: number, accent: boolean) {
     const ctx = this.ensureCtx();
@@ -93,6 +119,7 @@ export class PreviewAudio {
     g.connect(this.master!);
     osc.start(time);
     osc.stop(time + 0.06);
+    this.registrar(osc);
   }
 
   // --- una voz del sintetizador — game.js:183 ---
@@ -109,6 +136,29 @@ export class PreviewAudio {
     g.connect(this.master!);
     osc.start(time);
     osc.stop(time + dur + 0.03);
+    this.registrar(osc);
+  }
+
+  /** Como playSynth pero con ataque configurable, para diferenciar los timbres. */
+  private playVoice(
+    time: number, freq: number, dur: number,
+    type: OscillatorType, peak: number, attack: number,
+  ) {
+    const ctx = this.ensureCtx();
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(peak, time + attack);
+    // Cae al 60% y recién ahí se apaga: da cuerpo en vez de un "pip" que se muere.
+    g.gain.exponentialRampToValueAtTime(peak * 0.6, time + Math.min(dur * 0.4, 0.25));
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    osc.connect(g);
+    g.connect(this.master!);
+    osc.start(time);
+    osc.stop(time + dur + 0.03);
+    this.registrar(osc);
   }
 
   // --- game.js:193 ---
@@ -118,13 +168,14 @@ export class PreviewAudio {
   }
 
   // --- acompañamiento reggae/island (bajo + chop + percusión) — game.js:197 ---
-  private scheduleBacking(events: ChordEvent[], startTime: number, countInBeats: number, beatDur: number, chordPcs: ChordPcs) {
+  private scheduleBacking(events: ChordEvent[], at: (t: number) => number | null, beatDur: number, chordPcs: ChordPcs) {
     for (const e of events) {
+      const barStart = at(e.t);
+      if (barStart === null) continue;
       const pcs = chordPcs[e.chord];
       if (!pcs || pcs.length === 0) continue;
       const rootPc = pcs[0];
       const dur = e.dur || 4;
-      const barStart = startTime + (countInBeats + e.t) * beatDur;
       const chopFreqs = this.chordFreqs(pcs, 5); // acordes brillantes arriba
 
       // Los eventos cortos (rasgueos de una corchea) no aguantan el patrón de
@@ -151,18 +202,19 @@ export class PreviewAudio {
    * se está editando. Las cuerdas entran escalonadas y el orden se invierte en los
    * rasgueos hacia arriba, así se distingue ↓ de ↑ al escuchar.
    */
-  private scheduleStrums(events: ChordEvent[], startTime: number, countInBeats: number, beatDur: number, chordPcs: ChordPcs) {
+  private scheduleStrums(events: ChordEvent[], at: (t: number) => number | null, beatDur: number, chordPcs: ChordPcs) {
     for (const e of events) {
+      const cuando = at(e.t);
+      if (cuando === null) continue;
       const pcs = chordPcs[e.chord];
       if (!pcs || pcs.length === 0) continue;
-      const at = startTime + (countInBeats + e.t) * beatDur;
       const freqs = this.chordFreqs(pcs, 4);
       const order = e.dir === 'u' ? [...freqs].reverse() : freqs;
       const spread = Math.min(0.03, beatDur * 0.12);
       // Sin doblar la octava y bien atrás en la mezcla: antes caía justo encima
       // del registro de la melodía y la tapaba.
       order.forEach((f, i) => {
-        this.playSynth(at + i * spread, f, Math.min(0.35, beatDur * e.dur), 'triangle', 0.07);
+        this.playSynth(cuando + i * spread, f, Math.min(0.35, beatDur * e.dur), 'triangle', 0.07);
       });
     }
   }
@@ -171,7 +223,7 @@ export class PreviewAudio {
    * Melodía de fondo. Suena más fuerte y con otro timbre que el "chop" del groove
    * para que se distinga de lo que el alumno tiene que tocar.
    */
-  private scheduleBackingMelody(notes: BackingEvent[], startTime: number, countInBeats: number, beatDur: number) {
+  private scheduleBackingMelody(notes: BackingEvent[], at: (t: number) => number | null, beatDur: number) {
     // Cuántas notas de relleno arrancan juntas: solo el acompañamiento se reparte
     // el volumen. La melodía y el bajo mantienen el suyo, si no quedan enterrados.
     const juntas = new Map<number, number>();
@@ -182,56 +234,37 @@ export class PreviewAudio {
     }
 
     for (const n of notes) {
+      const cuando = at(n.t);
+      if (cuando === null) continue;
       const midi = pitchToMidi(n.pitch);
       if (midi === null) continue;
       const freq = 440 * Math.pow(2, (midi - 69) / 12);
-      const at = startTime + (countInBeats + n.t) * beatDur;
       const largo = n.dur * beatDur;
       const voz = n.v ?? 'acomp';
 
       if (voz === 'lead') {
         // La melodía manda: onda con armónicos, más fuerte y sostenida.
-        this.playVoice(at, freq, Math.max(0.12, largo * 0.92), 'triangle', 0.34, 0.012);
+        this.playVoice(cuando, freq, Math.max(0.12, largo * 0.92), 'triangle', 0.34, 0.012);
       } else if (voz === 'bass') {
-        this.playVoice(at, freq, Math.max(0.1, largo * 0.8), 'sine', 0.3, 0.008);
+        this.playVoice(cuando, freq, Math.max(0.1, largo * 0.8), 'sine', 0.3, 0.008);
       } else {
         const n_ = juntas.get(Math.round(n.t * 1000)) ?? 1;
-        this.playVoice(at, freq, Math.max(0.08, largo * 0.7), 'triangle', 0.11 / Math.sqrt(n_), 0.006);
+        this.playVoice(cuando, freq, Math.max(0.08, largo * 0.7), 'triangle', 0.11 / Math.sqrt(n_), 0.006);
       }
     }
-  }
-
-  /** Como playSynth pero con ataque configurable, para diferenciar los timbres. */
-  private playVoice(
-    time: number, freq: number, dur: number,
-    type: OscillatorType, peak: number, attack: number,
-  ) {
-    const ctx = this.ensureCtx();
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = freq;
-    g.gain.setValueAtTime(0.0001, time);
-    g.gain.exponentialRampToValueAtTime(peak, time + attack);
-    // Cae al 60% y recién ahí se apaga: da cuerpo en vez de un "pip" que se muere.
-    g.gain.exponentialRampToValueAtTime(peak * 0.6, time + Math.min(dur * 0.4, 0.25));
-    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
-    osc.connect(g);
-    g.connect(this.master!);
-    osc.start(time);
-    osc.stop(time + dur + 0.03);
   }
 
   /**
    * Las notas que toca el alumno, para escuchar cómo suena la melodía del nivel.
    * Timbre distinto del fondo, así se distingue lo propio de lo ajeno.
    */
-  private scheduleMelody(notes: MelodyEvent[], startTime: number, countInBeats: number, beatDur: number) {
+  private scheduleMelody(notes: MelodyEvent[], at: (t: number) => number | null, beatDur: number) {
     for (const n of notes) {
+      const cuando = at(n.t);
+      if (cuando === null) continue;
       const midi = STRING_MIDI[n.string] + n.fret;
       const freq = 440 * Math.pow(2, (midi - 69) / 12);
-      const at = startTime + (countInBeats + n.t) * beatDur;
-      this.playSynth(at, freq, Math.max(0.1, n.dur * beatDur * 0.9), 'triangle', 0.22);
+      this.playSynth(cuando, freq, Math.max(0.1, n.dur * beatDur * 0.9), 'triangle', 0.22);
     }
   }
 
@@ -240,65 +273,81 @@ export class PreviewAudio {
     const ctx = this.ensureCtx();
     const {
       events, bpm, beatsPerBar, chordPcs, backingNotes = [], melodyNotes = [],
-      recordedUrl = null, recordedOffset = 0, pickup = 0,
+      recordedUrl = null, recordedOffset = 0, pickup = 0, desdeBeat = 0,
       countInBars = 1, metronome = true, backing = true,
       onBeat, onEnd,
     } = opts;
     // La grabación tiene que estar ya decodificada (loadRecorded) para arrancar a tiempo.
-    const recorded = recordedUrl ? PreviewAudio.cache.get(recordedUrl) ?? null : null;
+    const recorded = recordedUrl ? this.cache.get(recordedUrl) ?? null : null;
 
     const beatDur = 60 / bpm;
     const countInBeats = countInBars * beatsPerBar;
     const startTime = ctx.currentTime + 0.25;
+    /** Dónde cae, en el reloj real, el tiempo desde el que se arranca. */
+    const cero = startTime + countInBeats * beatDur;
+
+    /**
+     * Convierte un tiempo del chart en un instante del reloj de audio.
+     * Devuelve null si ese evento quedó antes del punto de arranque — así
+     * "escuchar desde el compás 7" no vuelve a disparar los seis anteriores.
+     */
+    const at = (t: number): number | null =>
+      t < desdeBeat - 0.001 ? null : cero + (t - desdeBeat) * beatDur;
+
     // El nivel dura lo que dure la capa más larga: el fondo puede pasarse de lo jugable.
     const lastBeat = Math.max(
       events.reduce((m, e) => Math.max(m, e.t + (e.dur || 1)), 0),
       melodyNotes.reduce((m, e) => Math.max(m, e.t + (e.dur || 1)), 0),
       backingNotes.reduce((m, e) => Math.max(m, e.t + (e.dur || 1)), 0),
     );
-    const totalBeats = countInBeats + Math.ceil(lastBeat);
+    const totalBeats = countInBeats + Math.max(1, Math.ceil(lastBeat - desdeBeat));
 
     if (metronome) {
       // Igual que en la app de alumnos: con grabación, el clic marca solo la entrada.
-      const hasta = recorded ? countInBeats : totalBeats;
+      const hasta = recorded && backing ? countInBeats : totalBeats;
       for (let i = 0; i < hasta; i++) {
         // El acento marca el tiempo fuerte REAL. Con anacrusa, el primer compás
         // completo no empieza en el beat 0 sino después: acentuar cada N desde cero
         // pone el golpe en la sílaba equivocada y la canción no se reconoce.
-        const desdeElUno = i - countInBeats - pickup;
+        const desdeElUno = i - countInBeats + desdeBeat - pickup;
         const acento = ((desdeElUno % beatsPerBar) + beatsPerBar) % beatsPerBar === 0;
         this.scheduleClick(startTime + i * beatDur, acento);
       }
     }
-    if (recorded) {
-      const src = ctx.createBufferSource();
-      src.buffer = recorded;
-      src.connect(this.master!);
-      const when = startTime + countInBeats * beatDur + recordedOffset;
-      if (when >= ctx.currentTime) src.start(when);
-      else src.start(ctx.currentTime, ctx.currentTime - when); // ya pasó: entra por el medio
-      this.source = src;
-    } else if (backing) {
-      // Una sola fuente de acompañamiento: si hay fondo escrito, ESE es el
-      // acompañamiento. Sumarle además el groove sintetizado encimaba dos
-      // acompañamientos con ritmos distintos y volvía la canción irreconocible.
-      if (backingNotes.length > 0) {
-        this.scheduleBackingMelody(backingNotes, startTime, countInBeats, beatDur);
-        this.scheduleStrums(events, startTime, countInBeats, beatDur, chordPcs);
+
+    // ---- El acompañamiento: es lo ÚNICO que apaga la casilla ----
+    if (backing) {
+      if (recorded) {
+        const src = ctx.createBufferSource();
+        src.buffer = recorded;
+        src.connect(this.master!);
+        // Posición de la grabación que corresponde al tiempo desde el que se arranca.
+        const pos = desdeBeat * beatDur - recordedOffset;
+        if (pos >= 0) src.start(cero, pos);
+        else src.start(cero - pos); // la grabación entra después del tiempo 1
+        this.registrar(src);
+      } else if (backingNotes.length > 0) {
+        // Una sola fuente de acompañamiento: si hay fondo escrito, ESE es el
+        // acompañamiento. Sumarle además el groove sintetizado encimaba dos
+        // acompañamientos con ritmos distintos y volvía la canción irreconocible.
+        this.scheduleBackingMelody(backingNotes, at, beatDur);
       } else {
-        this.scheduleBacking(events, startTime, countInBeats, beatDur, chordPcs);
-        this.scheduleStrums(events, startTime, countInBeats, beatDur, chordPcs);
+        this.scheduleBacking(events, at, beatDur, chordPcs);
       }
     }
-    // Las notas del alumno suenan siempre: son lo que se está editando.
-    this.scheduleMelody(melodyNotes, startTime, countInBeats, beatDur);
+
+    // ---- Lo que se está editando: suena SIEMPRE ----
+    // Ni la casilla de acompañamiento ni la existencia de una grabación lo apagan.
+    // Con audio grabado es justo cuando más falta hace, para juzgar si calza.
+    this.scheduleStrums(events, at, beatDur, chordPcs);
+    this.scheduleMelody(melodyNotes, at, beatDur);
 
     this.playing = true;
 
     // Cursor: beat actual, negativo mientras corre la cuenta de entrada.
     const tick = () => {
       if (!this.playing || !this.ctx) return;
-      const beat = (this.ctx.currentTime - startTime) / beatDur - countInBeats;
+      const beat = (this.ctx.currentTime - cero) / beatDur + desdeBeat;
       onBeat?.(beat);
       this.raf = requestAnimationFrame(tick);
     };
@@ -313,23 +362,31 @@ export class PreviewAudio {
 
   stop() {
     this.playing = false;
-    if (this.source) {
+    // Se cortan las fuentes una por una en vez de cerrar el motor entero: los
+    // navegadores limitan cuántos motores se pueden abrir, y la caché de audios
+    // decodificados quedaba colgando de uno cerrado.
+    for (const n of this.nodos) {
       try {
-        this.source.stop();
+        n.stop();
       } catch {
-        /* ya estaba detenida */
+        /* ya había terminado sola */
       }
-      this.source = null;
     }
+    this.nodos = [];
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
     if (this.endTimer !== null) window.clearTimeout(this.endTimer);
     this.endTimer = null;
-    // Cortar lo ya programado: se cierra el contexto y se rearma en el próximo play.
+  }
+
+  /** Al desmontar la pantalla sí se cierra: ya no hay nada que reproducir. */
+  dispose() {
+    this.stop();
     if (this.ctx) {
       void this.ctx.close();
       this.ctx = null;
       this.master = null;
+      this.cache.clear();
     }
   }
 }

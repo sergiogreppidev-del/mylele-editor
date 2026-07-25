@@ -80,6 +80,8 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
   const [cursorBeat, setCursorBeat] = useState<number | null>(null);
   const [metronome, setMetronome] = useState(true);
   const [backing, setBacking] = useState(true);
+  /** Desde qué compás escuchar. Verificar el final no puede costar la canción entera. */
+  const [desdeCompas, setDesdeCompas] = useState(1);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +90,8 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
 
   const audio = useRef<PreviewAudio | null>(null);
   if (!audio.current) audio.current = new PreviewAudio();
-  useEffect(() => () => audio.current?.stop(), []);
+  // Al salir de la pantalla sí se cierra el motor de audio; entre reproducciones no.
+  useEffect(() => () => audio.current?.dispose(), []);
 
   /**
    * Vuelca a la pantalla las capas de una fila YA TRAÍDA. Sin red.
@@ -425,6 +428,8 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     const evs = overridePlayable ?? playable;
     const bck = overrideBacking ?? backingNotes;
     if (evs.length === 0 && bck.length === 0) return;
+    // El compás 1 arranca donde termina la anacrusa, no en el tiempo 0.
+    const desdeBeat = desdeCompas <= 1 ? 0 : song.pickup_beats + (desdeCompas - 1) * bpb;
     audio.current?.play({
       events: evs.filter((e): e is ChordEvent => 'chord' in e),
       melodyNotes: evs.filter((e): e is MelodyEvent => 'string' in e),
@@ -435,6 +440,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
       recordedUrl: audioReady ? recordedUrl : null,
       recordedOffset: song.audio_offset_s,
       pickup: song.pickup_beats,
+      desdeBeat,
       metronome,
       backing,
       onBeat: (b) => setCursorBeat(b),
@@ -1162,7 +1168,8 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
                 <span>Acompañamiento</span>
               </label>
               <span className="muted">
-                Entra con un compás de cuenta · {song.bpm} BPM · {tidy(chartLengthBeats(playable))} beats
+                Entra con un compás de cuenta · {song.bpm} BPM · {tidy(chartLengthBeats(playable))} beats.
+                Lo que estás editando <b>suena siempre</b>: estas casillas solo apagan lo que lo acompaña.
               </span>
             </div>
           </div>
@@ -1293,6 +1300,21 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
         <CandyButton tone="ghost" small onClick={stop}>
           ■
         </CandyButton>
+        <label className="row" style={{ gap: 6 }}>
+          <span className="muted">desde el compás</span>
+          <select
+            className="f tnum"
+            style={{ width: 74 }}
+            value={Math.min(desdeCompas, bars)}
+            onChange={(e) => setDesdeCompas(Number(e.target.value))}
+          >
+            {Array.from({ length: bars }, (_, i) => (
+              <option key={i} value={i + 1}>
+                {i + 1}
+              </option>
+            ))}
+          </select>
+        </label>
         <CandyButton
           tone="sun"
           small
