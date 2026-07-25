@@ -116,6 +116,52 @@ check('el 2do acorde entra en el beat 4', rt.chordEvents[1].t === 4 && rt.chordE
 check('el cambio de mitad de compás cae en el beat 6',
   rt.chordEvents[2].t === 6 && rt.chordEvents[2].chord === 'C', JSON.stringify(rt.chordEvents[2]));
 
+console.log('\n=== Polifonía en el fondo (corchetes) ===');
+const poli = 'FONDO: | [C3,E3,G3]/2 [F3,A3,C4]/2 | [G3,B3,D4]/4 |';
+const rp = N.parseNotation(poli, { target: 'backing', beatsPerBar: 4, knownChords: [] });
+check('sin errores', rp.issues.filter((i) => i.level === 'error').length === 0,
+  JSON.stringify(rp.issues.map((i) => i.message)));
+check('9 notas (3 acordes de 3)', rp.backingEvents.length === 9, String(rp.backingEvents.length));
+check('las 3 primeras arrancan juntas en 0',
+  rp.backingEvents.slice(0, 3).every((e) => e.t === 0), JSON.stringify(rp.backingEvents.slice(0, 3)));
+check('el 2do acorde entra en el beat 2', rp.backingEvents[3].t === 2);
+check('el compás avanza por token, no por nota', rp.totalBeats === 8, String(rp.totalBeats));
+check('varias notas juntas ya no dan aviso', N.validateBacking(rp.backingEvents).length === 0,
+  JSON.stringify(N.validateBacking(rp.backingEvents)));
+
+const poliMal = 'MELODIA: | [C4,E4]/2 r/2 |';
+const rpm = N.parseNotation(poliMal, { target: 'melody', beatsPerBar: 4, knownChords: [] });
+check('corchetes en lo que toca el alumno → error',
+  rpm.issues.some((i) => i.level === 'error' && /una nota por vez/.test(i.message)),
+  JSON.stringify(rpm.issues.map((i) => i.message)));
+
+console.log('\n=== Un nivel entero en un solo pegado ===');
+const nivel = [
+  'BPM: 100',
+  'COMPAS: 4/4',
+  'FONDO:   | [C3,E3,G3]/4 | [F3,A3,C4]/2 [C3,E3,G3]/2 |',
+  'MELODIA: | C4/1 C4/1 G4/1 G4/1 | A4/1 A4/1 G4/2 |',
+  'ACORDES: | C/4 | F/2 C/2 |',
+].join('\n');
+const rn = N.parseNotation(nivel, { target: 'chords', beatsPerBar: 4, knownChords: ['C', 'F', 'G', 'Am'] });
+const errN = rn.issues.filter((i) => i.level === 'error');
+check('sin errores', errN.length === 0, JSON.stringify(errN.map((i) => i.message)));
+check('lee el BPM del nivel', rn.suggested.bpm === 100);
+check('lee el compás del nivel', rn.suggested.timeSig === '4/4');
+check('fondo: 9 notas', rn.backingEvents.length === 9, String(rn.backingEvents.length));
+check('melodía: 7 notas en tablatura', rn.melodyEvents.length === 7, String(rn.melodyEvents.length));
+check('acordes: 3', rn.chordEvents.length === 3, String(rn.chordEvents.length));
+check('las tres capas duran 8 tiempos', rn.totalBeats === 8, String(rn.totalBeats));
+check('la melodía se convirtió a cuerda+traste', rn.melodyEvents.every((e) => 'string' in e && 'fret' in e));
+check('el acorde del compás 2 cambia en el beat 6',
+  rn.chordEvents[2].t === 6 && rn.chordEvents[2].chord === 'C', JSON.stringify(rn.chordEvents[2]));
+
+const nivelMal = ['COMPAS: 4/4', 'MELODIA: | C4/1 C4/1 |', 'ACORDES: | Xx/4 |'].join('\n');
+const rnm = N.parseNotation(nivelMal, { target: 'chords', beatsPerBar: 4, knownChords: ['C'] });
+check('el aviso dice de qué capa es',
+  rnm.issues.some((i) => /^Acordes · /.test(i.message)),
+  JSON.stringify(rnm.issues.map((i) => i.message)));
+
 console.log('\n=== El pedido que se le manda a la IA ===');
 const P = require('./build/aiPrompt.js');
 const base = { target: 'chords', title: 'T', bpm: 80, timeSig: '4/4', beatsPerBar: 4, bars: 8,

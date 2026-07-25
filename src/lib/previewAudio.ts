@@ -168,13 +168,21 @@ export class PreviewAudio {
    * para que se distinga de lo que el alumno tiene que tocar.
    */
   private scheduleBackingMelody(notes: BackingEvent[], startTime: number, countInBeats: number, beatDur: number) {
+    // El fondo es polifónico: si tres notas arrancan juntas, sus amplitudes se suman
+    // y satura. Se reparte el volumen entre las voces que suenan a la vez.
+    const juntas = new Map<number, number>();
+    for (const n of notes) {
+      const k = Math.round(n.t * 1000);
+      juntas.set(k, (juntas.get(k) ?? 0) + 1);
+    }
     for (const n of notes) {
       const midi = pitchToMidi(n.pitch);
       if (midi === null) continue;
+      const voces = juntas.get(Math.round(n.t * 1000)) ?? 1;
       const freq = 440 * Math.pow(2, (midi - 69) / 12);
       const at = startTime + (countInBeats + n.t) * beatDur;
       // 0.9 en vez de 1: deja un respiro entre notas para que no suene ligado.
-      this.playSynth(at, freq, Math.max(0.08, n.dur * beatDur * 0.9), 'sine', 0.2);
+      this.playSynth(at, freq, Math.max(0.08, n.dur * beatDur * 0.9), 'sine', 0.2 / Math.sqrt(voces));
     }
   }
 

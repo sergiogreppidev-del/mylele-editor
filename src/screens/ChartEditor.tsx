@@ -10,9 +10,10 @@ import type { Step } from '../components/Steps';
 import { PreviewAudio } from '../lib/previewAudio';
 import type { ChordPcs } from '../lib/previewAudio';
 import { BackingLane } from '../components/BackingLane';
+import { LevelOverview, largoDeCapas } from '../components/LevelOverview';
 import { ImportDialog } from '../components/ImportDialog';
 import { STRING_MIDI, midiToPitch, validateBacking } from '../lib/notation';
-import type { NotationTarget } from '../lib/notation';
+import type { ImportTarget } from '../lib/aiPrompt';
 import {
   BACKING_MODE, BPM_MAX, BPM_MIN, MAX_FRET, UKE_STRINGS, barCount, beatsPerBar, chartLengthBeats,
   dirForBeat, hasErrors, tidy, validateChart, validateSong,
@@ -56,7 +57,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
   const [events, setEvents] = useState<ChordEvent[]>([]);
   const [melody, setMelody] = useState<MelodyEvent[]>([]);
   const [backingNotes, setBackingNotes] = useState<BackingEvent[]>([]);
-  const [importTarget, setImportTarget] = useState<NotationTarget | null>(null);
+  const [importTarget, setImportTarget] = useState<ImportTarget | null>(null);
 
   const [brush, setBrush] = useState<string | null>(chords[0]?.id ?? null);
   const [fretBrush, setFretBrush] = useState(0);
@@ -566,9 +567,22 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
           </div>
 
           <p className="muted" style={{ margin: '10px 0 0' }}>
-            Si no sabés el compás ni el tempo de la canción, dejalos como están: en el paso
-            siguiente la IA te los dice y se aplican solos.
+            Si no sabés el compás ni el tempo de la canción, dejalos como están: la IA te los dice
+            y se aplican solos.
           </p>
+
+          {/* El camino rápido: una sola pasada y sale el nivel entero. */}
+          <div className="notice" style={{ marginTop: 12 }}>
+            <div className="row">
+              <span className="grow">
+                <b>¿Vas a partir de una canción?</b> Pedile a la IA el nivel completo —
+                acompañamiento, melodía y acordes— de una sola vez.
+              </span>
+              <CandyButton tone="sun" onClick={() => setImportTarget('nivel')}>
+                ✨ Generar nivel completo
+              </CandyButton>
+            </div>
+          </div>
 
           <details className="avanzado" style={{ marginTop: 10 }}>
             <summary>▸ Más opciones</summary>
@@ -791,6 +805,38 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
               )}
             </div>
           </div>
+
+          {/* ---------- las tres capas alineadas ---------- */}
+          {(melody.length > 0 || backingNotes.length > 0) && (
+            <div className="card">
+              <div className="row" style={{ marginBottom: 10 }}>
+                <div className="section-title grow">Las tres capas juntas</div>
+                {(() => {
+                  const l = largoDeCapas(events, melody, backingNotes);
+                  const usadas = [l.acordes, l.melodia, l.fondo].filter((x) => x > 0);
+                  const desparejo = usadas.length > 1 && Math.max(...usadas) - Math.min(...usadas) > 0.001;
+                  return desparejo ? (
+                    <span className="badge draft">
+                      ✎ No terminan juntas: acordes {tidy(l.acordes)} · melodía {tidy(l.melodia)} · fondo {tidy(l.fondo)}
+                    </span>
+                  ) : null;
+                })()}
+              </div>
+              <LevelOverview
+                chords={events}
+                melody={melody}
+                backing={backingNotes}
+                timeSig={song.time_sig}
+                pxPerBeat={pxPerBeat}
+                bars={bars}
+                cursorBeat={cursorBeat}
+              />
+              <p className="muted" style={{ margin: '8px 0 0' }}>
+                Para verificar que la armonía calce con la melodía. Si un acorde cambia donde la
+                melodía no cambia de nota, casi siempre está corrido.
+              </p>
+            </div>
+          )}
 
           {/* ---------- atajos de estructura ---------- */}
           <div className="card">
@@ -1057,8 +1103,12 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
             if (r.chords) setEv(r.chords);
             if (r.melody) setMel(r.melody);
             if (r.backing) applyBacking(r.backing);
+            // Un nivel completo puede traer melodía y acordes a la vez: el modo del
+            // nivel lo define la capa que el alumno va a tocar.
+            if (importTarget === 'nivel' && r.melody?.length && !r.chords?.length) setMode('melody');
             setSelected(null);
             setImportTarget(null);
+            setPaso('musica');
             stop();
           }}
           onClose={() => {

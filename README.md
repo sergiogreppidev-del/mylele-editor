@@ -67,7 +67,34 @@ Un nivel tiene **dos capas**:
 - **Fondo** — una melodía que suena sola. La toca la app, el alumno no.
 - **Juego** — los acordes o notas que el alumno tiene que tocar encima.
 
-Las dos se pueden importar con el botón **✨ Importar con IA**. El ciclo es:
+## Un nivel entero de un solo pedido
+
+El camino rápido es **✨ Generar nivel completo** (en el paso *Datos*): un solo pedido y la IA
+escribe las tres capas ya alineadas entre sí.
+
+```
+BPM: 100
+COMPAS: 4/4
+FONDO:   | [C3,E3,G3]/2 [C3,E3,G3]/2 | [F2,A2,C3]/2 [C3,E3,G3]/2 |
+MELODIA: | C4/1 C4/1 G4/1 G4/1 | A4/1 A4/1 G4/2 |
+ACORDES: | C/4 | F/2 C/2 |
+```
+
+- Los **corchetes** son notas simultáneas: `[C3,E3,G3]/2` es un acorde de fondo que dura 2 tiempos.
+  Solo valen en el fondo — el alumno toca una nota por vez.
+- Las tres capas tienen que **durar lo mismo**. Si no, el editor te lo marca.
+- Los acordes suelen salir mejor así que pidiéndolos aparte, porque la IA los arma con la melodía
+  que acaba de escribir delante.
+
+Después de aceptar, la tarjeta **"Las tres capas juntas"** las muestra apiladas en la misma línea
+de tiempo. Generar es rápido; **verificar es lo que lleva tiempo**, y esa vista es para eso: si un
+acorde cambia donde la melodía no cambia de nota, casi siempre está corrido.
+
+---
+
+## Importar una capa sola
+
+Las capas también se pueden traer por separado con **✨ Importar con IA**. El ciclo es:
 
 1. **Copiar instrucciones** → arma el pedido completo. Lo pegás en Claude o ChatGPT.
 2. **Pegar** lo que te devuelva.

@@ -271,6 +271,26 @@ details.avanzado[open] > summary { margin-bottom: 10px; }
 .fret-chip:active { transform: translateY(3px); box-shadow: 0 1px 0 #D9CFEA; }
 .fret-chip.sel { background: var(--grape); color: #fff; box-shadow: 0 4px 0 var(--grape-d); }
 
+/* ---- Vista apilada de las tres capas ---- */
+.ov-wrap { display: flex; align-items: flex-start; }
+.ov-labels { width: 62px; flex: none; }
+.ov-labels div {
+  display: flex; align-items: center; justify-content: flex-end; padding-right: 8px;
+  font-size: 11px; font-weight: 800; color: var(--ink-2); text-transform: uppercase; letter-spacing: .4px;
+}
+.ov-lanes {
+  position: relative; background: var(--cream);
+  border: 3px solid var(--ink); border-radius: 16px; overflow: hidden;
+}
+.ov-chord {
+  position: absolute; top: 4px; height: 22px; border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Titan One', cursive; font-weight: 400; font-size: 12px; color: #fff;
+  text-shadow: 0 1px 0 rgba(0,0,0,.25); overflow: hidden; border: 2px solid var(--ink);
+}
+.ov-note { position: absolute; height: 6px; border-radius: 3px; border: 1.5px solid var(--ink); }
+.ov-back { position: absolute; height: 5px; border-radius: 3px; background: var(--grape); opacity: .9; }
+
 /* ---- Carril del acompañamiento (piano roll) ---- */
 .backing-lane {
   position: relative; height: 62px; background: #F2ECFF;

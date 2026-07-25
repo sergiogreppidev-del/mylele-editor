@@ -8,8 +8,11 @@
 
 import type { NotationTarget } from './notation';
 
+/** 'nivel' genera las tres capas de una sola vez. */
+export type ImportTarget = NotationTarget | 'nivel';
+
 interface PromptOptions {
-  target: NotationTarget;
+  target: ImportTarget;
   title: string;
   bpm: number;
   timeSig: string;
@@ -41,6 +44,8 @@ Una sola línea con elementos separados por espacios.
 const SOLO_LA_LINEA = `Respondé ÚNICAMENTE con eso, sin explicaciones, sin comillas y sin bloque de código.`;
 
 export function buildAiPrompt(o: PromptOptions): string {
+  if (o.target === 'nivel') return promptNivelCompleto(o);
+
   const pedido = o.pedido?.trim();
   const partes: string[] = [
     'Sos un asistente que escribe partituras para MyLele, una app para aprender ukelele.',
@@ -167,8 +172,68 @@ export function buildAiPrompt(o: PromptOptions): string {
   return partes.join('\n');
 }
 
-export const TARGET_LABEL: Record<NotationTarget, string> = {
+export const TARGET_LABEL: Record<ImportTarget, string> = {
+  nivel: 'un nivel completo',
   chords: 'acordes (lo que toca el alumno)',
   melody: 'notas sueltas (lo que toca el alumno)',
   backing: 'melodía de fondo (la toca la app)',
 };
+
+/**
+ * Pedido de un NIVEL ENTERO: la IA escribe el acompañamiento, la melodía y los
+ * acordes en una sola pasada. La ventaja no es solo ahorrar pasos: al armar los
+ * acordes tiene la melodía que acaba de escribir delante, que es exactamente lo
+ * que le faltaba cuando los acordes salían despegados de la canción.
+ */
+function promptNivelCompleto(o: PromptOptions): string {
+  const pedido = o.pedido?.trim();
+  const acordes = o.knownChords.join(', ') || '(no hay acordes cargados)';
+
+  return [
+    'Sos un asistente que escribe niveles para MyLele, una app para aprender ukelele.',
+    '',
+    'TAREA',
+    pedido
+      ? `Escribí el nivel completo de: ${pedido}`
+      : 'Escribí un nivel completo con una canción sencilla y reconocible.',
+    'Son tres capas de la misma canción, alineadas entre sí:',
+    '  FONDO   — el acompañamiento que reproduce la app. Puede sonar más de una nota a la vez.',
+    '  MELODIA — la melodía, una nota por vez. Es lo que puede tocar el alumno.',
+    '  ACORDES — los acordes que rasguea el alumno sobre esa melodía.',
+    '',
+    'MEDIDA (la decidís vos)',
+    'No fuerces la canción a un compás ni a un tempo que no le corresponden, y no la cortes ni la',
+    'estires para llegar a una cantidad redonda de compases: escribila como es, completa.',
+    '',
+    'REGLAS',
+    '- Las tres capas tienen que durar LO MISMO y estar alineadas: el acorde del compás 3 tiene',
+    '  que corresponder a lo que suena en el compás 3 de la melodía.',
+    `- ACORDES: usá únicamente estos: ${acordes}. Si la canción pide otro, poné el más parecido`,
+    '  (G7 -> G, Dm -> Am). Cada acorde va DONDE REALMENTE CAMBIA la armonía, aunque cambie en la',
+    '  mitad del compás: eso se escribe con dos acordes de media duración, por ejemplo "F/2 C/2".',
+    '  No pongas uno por compás por comodidad.',
+    '- MELODIA: notas entre C4 y A5, porque el alumno la toca en un ukelele. Si la canción es más',
+    '  grave, subila de octava. Una sola nota por vez.',
+    '- FONDO: cualquier octava (C2 a C7). Para que suenen varias notas juntas se escriben entre',
+    '  corchetes: "[C3,E3,G3]/2". Un bajo con acordes simples alcanza y sobra.',
+    '',
+    'FORMATO DE SALIDA (obligatorio)',
+    'Los tiempos se miden en TIEMPOS (beats): 1 = negra, .5 = corchea, 2 = blanca, 1.5 = con puntillo.',
+    '"r/1" es un silencio. "|" separa compases; poné una barra al final de cada compás.',
+    'NO escribas tiempos de inicio ni números de compás: se calculan solos sumando las duraciones.',
+    'Respondé exactamente con esta forma, sin explicaciones ni bloque de código:',
+    '',
+    'BPM: <número entre 40 y 200>',
+    'COMPAS: <por ejemplo 4/4, 3/4 o 6/8>',
+    'FONDO: <una línea>',
+    'MELODIA: <una línea>',
+    'ACORDES: <una línea>',
+    '',
+    'EJEMPLO (dos compases, para que se vea la forma)',
+    'BPM: 100',
+    'COMPAS: 4/4',
+    'FONDO: | [C3,E3,G3]/4 | [F3,A3,C4]/2 [C3,E3,G3]/2 |',
+    'MELODIA: | C4/1 C4/1 G4/1 G4/1 | A4/1 A4/1 G4/2 |',
+    'ACORDES: | C/4 | F/2 C/2 |',
+  ].join('\n');
+}

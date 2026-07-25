@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react';
 import { CandyButton } from './CandyButton';
 import { Issues } from './Issues';
 import { buildAiPrompt, TARGET_LABEL } from '../lib/aiPrompt';
+import type { ImportTarget } from '../lib/aiPrompt';
 import { parseNotation, toNotation } from '../lib/notation';
-import type { NotationTarget, SuggestedSetup } from '../lib/notation';
+import type { SuggestedSetup } from '../lib/notation';
 import { parseBacking, parseEvents, tidy } from '../lib/chartFormat';
 import type { BackingEvent, ChordEvent, Issue, MelodyEvent } from '../lib/chartFormat';
 
 interface Props {
-  target: NotationTarget;
+  target: ImportTarget;
   title: string;
   bpm: number;
   timeSig: string;
@@ -46,9 +47,17 @@ export function ImportDialog(props: Props) {
   const [imponerMedida, setImponerMedida] = useState(false);
   const [aplicarSetup, setAplicarSetup] = useState(true);
 
+  /** Generar el nivel entero reemplaza las tres capas: agregar al final no aplica. */
+  const esNivelCompleto = target === 'nivel';
+
   /** La capa que se está importando, tal como está ahora. */
-  const current: { t: number; dur: number }[] =
-    target === 'backing' ? props.currentBacking : target === 'melody' ? props.currentMelody : props.currentChords;
+  const current: { t: number; dur: number }[] = esNivelCompleto
+    ? []
+    : target === 'backing'
+      ? props.currentBacking
+      : target === 'melody'
+        ? props.currentMelody
+        : props.currentChords;
 
   const currentEnd = useMemo(() => {
     const end = current.reduce((m, e) => Math.max(m, e.t + e.dur), 0);
@@ -83,7 +92,13 @@ export function ImportDialog(props: Props) {
       }
     }
 
-    const r = parseNotation(trimmed, { target, beatsPerBar, knownChords, autoTranspose: true });
+    // En modo nivel completo, lo que venga sin encabezado de sección se toma como acordes.
+    const r = parseNotation(trimmed, {
+      target: esNivelCompleto ? 'chords' : target,
+      beatsPerBar,
+      knownChords,
+      autoTranspose: true,
+    });
     return {
       kind: 'notation' as const,
       chords: r.chordEvents,
@@ -94,7 +109,7 @@ export function ImportDialog(props: Props) {
       suggested: r.suggested,
       bpb: r.beatsPerBarUsed,
     };
-  }, [text, target, beatsPerBar, knownChords]);
+  }, [text, target, esNivelCompleto, beatsPerBar, knownChords]);
 
   const errors = parsed?.issues.filter((i) => i.level === 'error').length ?? 0;
   const count = parsed ? parsed.chords.length + parsed.melody.length + parsed.backing.length : 0;
@@ -159,17 +174,19 @@ export function ImportDialog(props: Props) {
               {copied ? '✓ Copiado' : '📋 Copiar instrucciones'}
             </CandyButton>
           </div>
-          <label className="row" style={{ gap: 7, marginTop: 8 }}>
-            <input
-              className="f"
-              type="checkbox"
-              checked={imponerMedida}
-              onChange={(e) => setImponerMedida(e.target.checked)}
-            />
-            <span>
-              Obligarla a usar <b>{props.timeSig} a {props.bpm} BPM</b> en <b>{bars} compases</b>
-            </span>
-          </label>
+          {!esNivelCompleto && (
+            <label className="row" style={{ gap: 7, marginTop: 8 }}>
+              <input
+                className="f"
+                type="checkbox"
+                checked={imponerMedida}
+                onChange={(e) => setImponerMedida(e.target.checked)}
+              />
+              <span>
+                Obligarla a usar <b>{props.timeSig} a {props.bpm} BPM</b> en <b>{bars} compases</b>
+              </span>
+            </label>
+          )}
           {melodiaDelNivel && (
             <div className="notice good" style={{ marginTop: 8 }}>
               🎵 Este nivel ya tiene la melodía cargada, así que va incluida en el pedido: la IA va a
@@ -177,7 +194,13 @@ export function ImportDialog(props: Props) {
             </div>
           )}
           <p className="muted" style={{ margin: '6px 0 0' }}>
-            {imponerMedida ? (
+            {esNivelCompleto ? (
+              <>
+                Un solo pedido y la IA escribe <b>el nivel entero</b>: acompañamiento, melodía y
+                acordes, ya alineados entre sí. Los acordes suelen salir mejor así, porque los arma
+                con la melodía que acaba de escribir delante.
+              </>
+            ) : imponerMedida ? (
               <>
                 La IA va a meter la música dentro de esa medida. Sirve para ejercicios propios;
                 para una canción conocida suele salir cortada o forzada.
@@ -202,12 +225,14 @@ export function ImportDialog(props: Props) {
           </div>
           <textarea
             className="f mono"
-            rows={4}
             placeholder={
-              target === 'chords'
-                ? '| C/4 | Am/4 | F/4 | G/4 |'
-                : '| G4/.5 G4/.5 A4/1 G4/1 | C5/1 B4/2 r/1 |'
+              esNivelCompleto
+                ? 'BPM: 100\nCOMPAS: 4/4\nFONDO: | [C3,E3,G3]/4 | ...\nMELODIA: | C4/1 C4/1 G4/1 G4/1 | ...\nACORDES: | C/4 | F/2 C/2 |'
+                : target === 'chords'
+                  ? '| C/4 | Am/4 | F/4 | G/4 |'
+                  : '| G4/.5 G4/.5 A4/1 G4/1 | C5/1 B4/2 r/1 |'
             }
+            rows={esNivelCompleto ? 7 : 4}
             spellCheck={false}
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -223,8 +248,37 @@ export function ImportDialog(props: Props) {
             <div className="section-title">3 · Revisá antes de aceptar</div>
             {count > 0 && (
               <div className="notice good" style={{ marginBottom: 8 }}>
-                {count} {target === 'chords' ? 'acordes' : 'notas'} · {tidy(parsed.totalBeats)} tiempos ·{' '}
-                {Math.round((parsed.totalBeats / parsed.bpb) * 10) / 10} compases
+                {esNivelCompleto ? (
+                  <>
+                    <b>Nivel completo</b> · {tidy(parsed.totalBeats)} tiempos ·{' '}
+                    {Math.round((parsed.totalBeats / parsed.bpb) * 10) / 10} compases
+                    <ul style={{ margin: '6px 0 0', paddingLeft: 20 }}>
+                      <li>Fondo: {parsed.backing.length} notas</li>
+                      <li>Melodía: {parsed.melody.length} notas</li>
+                      <li>Acordes: {parsed.chords.length}</li>
+                    </ul>
+                  </>
+                ) : (
+                  <>
+                    {count} {target === 'chords' ? 'acordes' : 'notas'} · {tidy(parsed.totalBeats)} tiempos ·{' '}
+                    {Math.round((parsed.totalBeats / parsed.bpb) * 10) / 10} compases
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Que falte una capa no es un error, pero casi siempre es un descuido. */}
+            {esNivelCompleto && count > 0 && (parsed.backing.length === 0 || parsed.melody.length === 0 || parsed.chords.length === 0) && (
+              <div className="notice warn" style={{ marginBottom: 8 }}>
+                Falta{' '}
+                {[
+                  parsed.backing.length === 0 && 'el fondo',
+                  parsed.melody.length === 0 && 'la melodía',
+                  parsed.chords.length === 0 && 'los acordes',
+                ]
+                  .filter(Boolean)
+                  .join(' y ')}
+                . Fijate que la respuesta tenga los tres renglones: <b>FONDO:</b>, <b>MELODIA:</b> y <b>ACORDES:</b>.
               </div>
             )}
 
@@ -271,24 +325,30 @@ export function ImportDialog(props: Props) {
                 >
                   ▶ Escuchar
                 </CandyButton>
-                <label className="row" style={{ gap: 6 }}>
-                  <input
-                    className="f"
-                    type="radio"
-                    checked={mode === 'replace'}
-                    onChange={() => setMode('replace')}
-                  />
-                  <span>Reemplazar todo</span>
-                </label>
-                <label className="row" style={{ gap: 6 }}>
-                  <input
-                    className="f"
-                    type="radio"
-                    checked={mode === 'append'}
-                    onChange={() => setMode('append')}
-                  />
-                  <span>Agregar desde el compás {Math.floor(currentEnd / beatsPerBar) + 1}</span>
-                </label>
+                {esNivelCompleto ? (
+                  <span className="muted">Reemplaza las tres capas del nivel.</span>
+                ) : (
+                  <>
+                    <label className="row" style={{ gap: 6 }}>
+                      <input
+                        className="f"
+                        type="radio"
+                        checked={mode === 'replace'}
+                        onChange={() => setMode('replace')}
+                      />
+                      <span>Reemplazar todo</span>
+                    </label>
+                    <label className="row" style={{ gap: 6 }}>
+                      <input
+                        className="f"
+                        type="radio"
+                        checked={mode === 'append'}
+                        onChange={() => setMode('append')}
+                      />
+                      <span>Agregar desde el compás {Math.floor(currentEnd / beatsPerBar) + 1}</span>
+                    </label>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -302,13 +362,23 @@ export function ImportDialog(props: Props) {
               if (!parsed) return;
               const add = mode === 'append';
               const setup = aplicarSetup ? parsed.suggested : undefined;
-              props.onApply(
-                target === 'backing'
-                  ? { backing: add ? [...props.currentBacking, ...shifted.backing] : shifted.backing, setup }
-                  : target === 'chords'
-                    ? { chords: add ? [...props.currentChords, ...shifted.chords] : shifted.chords, setup }
-                    : { melody: add ? [...props.currentMelody, ...shifted.melody] : shifted.melody, setup },
-              );
+              if (esNivelCompleto) {
+                // Las tres capas de una: se reemplaza todo lo que traiga el pegado.
+                props.onApply({
+                  setup,
+                  chords: shifted.chords,
+                  melody: shifted.melody,
+                  backing: shifted.backing,
+                });
+              } else {
+                props.onApply(
+                  target === 'backing'
+                    ? { backing: add ? [...props.currentBacking, ...shifted.backing] : shifted.backing, setup }
+                    : target === 'chords'
+                      ? { chords: add ? [...props.currentChords, ...shifted.chords] : shifted.chords, setup }
+                      : { melody: add ? [...props.currentMelody, ...shifted.melody] : shifted.melody, setup },
+                );
+              }
             }}
           >
             Aceptar

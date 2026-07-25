@@ -114,16 +114,20 @@ export function validateBacking(events: BackingEvent[]): Issue[] {
     }
   });
 
-  // El fondo es de una sola voz: si se pisan, la segunda tapa a la primera.
-  const sorted = [...events].sort((a, b) => a.t - b.t);
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i - 1].t + sorted[i - 1].dur > sorted[i].t + 0.001) {
-      issues.push({
-        level: 'warn',
-        message: `En el fondo se superponen dos notas alrededor del beat ${tidy(sorted[i].t)}. Van a sonar juntas.`,
-      });
-      break; // con avisar una vez alcanza
-    }
+  // El fondo es polifónico: varias notas a la vez son un acorde, no un error.
+  // Lo único que se avisa es un amontonamiento absurdo, que suele ser un pegado
+  // duplicado por accidente y suena a barro.
+  const porTiempo = new Map<number, number>();
+  for (const e of events) {
+    const k = Math.round(e.t * 1000);
+    porTiempo.set(k, (porTiempo.get(k) ?? 0) + 1);
+  }
+  const maxJuntas = Math.max(0, ...porTiempo.values());
+  if (maxJuntas > 6) {
+    issues.push({
+      level: 'warn',
+      message: `Hay ${maxJuntas} notas de fondo sonando exactamente juntas. Es mucho: fijate que no se haya pegado dos veces lo mismo.`,
+    });
   }
   return issues;
 }
@@ -184,12 +188,16 @@ function extractHeader(text: string): { rest: string; suggested: SuggestedSetup 
 
 interface Token {
   raw: string;
-  name: string;
+  /** Normalmente una sola. Varias cuando el token es "[C3,E3,G3]" (notas simultáneas). */
+  names: string[];
+  poly: boolean;
   dur: number;
   dir?: 'd' | 'u';
 }
 
 const REST_NAMES = new Set(['r', 'R', '-', '_']);
+const esSilencio = (tk: { names: string[]; poly: boolean }) =>
+  !tk.poly && tk.names.length === 1 && REST_NAMES.has(tk.names[0]);
 
 function stripComments(text: string): string {
   return text
@@ -201,34 +209,100 @@ function stripComments(text: string): string {
     .join('\n');
 }
 
-/**
- * Convierte el texto en eventos con sus tiempos ya calculados.
- * `autoTranspose` mueve la melodía por octavas si no entra en el ukelele
- * (solo aplica al modo melody: el fondo puede sonar en cualquier octava).
- */
-export function parseNotation(
-  text: string,
-  opts: {
-    target: NotationTarget;
-    beatsPerBar: number;
-    knownChords: string[];
-    autoTranspose?: boolean;
-  },
-): ParsedNotation {
-  const issues: Issue[] = [];
-  const chordEvents: ChordEvent[] = [];
-  const melodyEvents: MelodyEvent[] = [];
-  const backingEvents: BackingEvent[] = [];
+export interface ParseOptions {
+  target: NotationTarget;
+  beatsPerBar: number;
+  knownChords: string[];
+  autoTranspose?: boolean;
+}
 
+const SECCION_RE = /^\s*(fondo|backing|melod[ií]a|melody|acordes|chords)\s*:\s*(.*)$/i;
+const SECCION_TARGET: Record<string, NotationTarget> = {
+  fondo: 'backing', backing: 'backing',
+  melodia: 'melody', 'melodía': 'melody', melody: 'melody',
+  acordes: 'chords', chords: 'chords',
+};
+const SECCION_LABEL: Record<NotationTarget, string> = {
+  chords: 'Acordes',
+  melody: 'Melodía',
+  backing: 'Fondo',
+};
+
+/**
+ * Reparte el texto en capas. Un nivel entero se pega de una sola vez así:
+ *
+ *   BPM: 100
+ *   COMPAS: 4/4
+ *   FONDO:   | [C3,E3,G3]/4 | ...
+ *   MELODIA: | C4/1 C4/1 G4/1 G4/1 | ...
+ *   ACORDES: | C/4 | F/2 C/2 |
+ *
+ * Sin encabezados de sección, todo el texto es una sola capa —la del `target`
+ * que pidió quien llama—, que es como funcionaba antes.
+ */
+function splitSections(text: string, target: NotationTarget): { target: NotationTarget; body: string }[] {
+  const out: { target: NotationTarget; body: string[] }[] = [];
+  let actual: { target: NotationTarget; body: string[] } | null = null;
+
+  for (const line of text.split('\n')) {
+    const m = SECCION_RE.exec(line);
+    if (m) {
+      actual = { target: SECCION_TARGET[m[1].toLowerCase()], body: m[2] ? [m[2]] : [] };
+      out.push(actual);
+    } else if (actual) {
+      actual.body.push(line);
+    } else if (line.trim()) {
+      // Texto suelto antes de cualquier sección: es la capa que se pidió.
+      actual = { target, body: [line] };
+      out.push(actual);
+    }
+  }
+  return out.map((s) => ({ target: s.target, body: s.body.join('\n') }));
+}
+
+/** Convierte el texto en eventos con sus tiempos ya calculados. */
+export function parseNotation(text: string, opts: ParseOptions): ParsedNotation {
   // La cabecera se saca primero: si la IA declaró el compás, los compases se
-  // verifican contra ESE, no contra el que tenga puesto el nivel. Si no, cada
-  // compás daría un aviso falso solo porque la canción está en 3/4 y el nivel en 4/4.
+  // verifican contra ESE, no contra el que tenga puesto el nivel.
   const { rest, suggested } = extractHeader(stripComments(text));
   const beatsPerBarUsed = suggested.timeSig
     ? Number(suggested.timeSig.split('/')[0]) || opts.beatsPerBar
     : opts.beatsPerBar;
 
-  const clean = rest.trim();
+  const vacio: ParsedNotation = {
+    chordEvents: [], melodyEvents: [], backingEvents: [], issues: [],
+    appliedShift: 0, totalBeats: 0, suggested, beatsPerBarUsed,
+  };
+
+  const secciones = splitSections(rest, opts.target);
+  if (secciones.length === 0) return vacio;
+
+  // Cada capa se analiza por separado y después se juntan los resultados. Con
+  // varias capas, los avisos se etiquetan para saber cuál de las tres falló.
+  return secciones.reduce<ParsedNotation>((acc, s) => {
+    const r = parseLayer(s.body, { ...opts, target: s.target }, beatsPerBarUsed);
+    const etiqueta = secciones.length > 1 ? SECCION_LABEL[s.target] + ' · ' : '';
+    return {
+      ...acc,
+      chordEvents: [...acc.chordEvents, ...r.chordEvents],
+      melodyEvents: [...acc.melodyEvents, ...r.melodyEvents],
+      backingEvents: [...acc.backingEvents, ...r.backingEvents],
+      issues: [...acc.issues, ...r.issues.map((i) => ({ ...i, message: etiqueta + i.message }))],
+      appliedShift: r.appliedShift || acc.appliedShift,
+      totalBeats: Math.max(acc.totalBeats, r.totalBeats),
+    };
+  }, vacio);
+}
+
+/** Analiza UNA capa. La cabecera ya viene sacada y el compás ya está resuelto. */
+function parseLayer(text: string, opts: ParseOptions, beatsPerBarUsed: number): ParsedNotation {
+  const issues: Issue[] = [];
+  const chordEvents: ChordEvent[] = [];
+  const melodyEvents: MelodyEvent[] = [];
+  const backingEvents: BackingEvent[] = [];
+  const suggested: SuggestedSetup = {};
+
+  const clean = text.trim();
   if (!clean) {
     return {
       chordEvents, melodyEvents, backingEvents, issues,
@@ -268,9 +342,19 @@ export function parseNotation(
       continue;
     }
 
-    const [namePart, durPart, dirPart] = splitToken(piece);
-    if (!namePart) {
+    const { names, poly, dur: durPart, dir: dirPart } = splitToken(piece);
+    if (names.length === 0) {
       issues.push({ level: 'error', message: `No entiendo "${piece}".` });
+      continue;
+    }
+    if (poly && opts.target !== 'backing') {
+      issues.push({
+        level: 'error',
+        message:
+          opts.target === 'chords'
+            ? `"${piece}": los corchetes son para notas simultáneas del fondo. Un acorde se escribe por su nombre, como C/4.`
+            : `"${piece}": el alumno toca una nota por vez. Si querés que suenen varias juntas, va en la capa de fondo o como acorde.`,
+      });
       continue;
     }
 
@@ -300,7 +384,7 @@ export function parseNotation(
       dir = d;
     }
 
-    tokens.push({ raw: piece, name: namePart, dur, dir });
+    tokens.push({ raw: piece, names, poly, dur, dir });
     barSum += dur;
     seenAnyToken = true;
   }
@@ -311,16 +395,18 @@ export function parseNotation(
   if (opts.target !== 'chords') {
     const midis: number[] = [];
     for (const tk of tokens) {
-      if (REST_NAMES.has(tk.name)) continue;
-      const midi = pitchToMidi(tk.name);
-      if (midi === null) {
-        issues.push({
-          level: 'error',
-          message: `"${tk.raw}" no es una nota. Se escribe nota + octava, por ejemplo G4, A#3 o Bb5. Para un silencio, r.`,
-        });
-        continue;
+      if (esSilencio(tk)) continue;
+      for (const name of tk.names) {
+        const midi = pitchToMidi(name);
+        if (midi === null) {
+          issues.push({
+            level: 'error',
+            message: `"${tk.raw}" no es una nota. Se escribe nota + octava, por ejemplo G4, A#3 o Bb5. Para un silencio, r.`,
+          });
+          continue;
+        }
+        midis.push(midi);
       }
-      midis.push(midi);
     }
 
     if (opts.target === 'melody' && midis.length > 0) {
@@ -346,22 +432,25 @@ export function parseNotation(
   // --- 3) Construir los eventos con el tiempo acumulado ---
   let t = 0;
   for (const tk of tokens) {
-    const isRest = REST_NAMES.has(tk.name);
+    const isRest = esSilencio(tk);
 
     if (opts.target === 'chords') {
       if (!isRest) {
-        if (!chordSet.has(tk.name)) {
+        const nombre = tk.names[0];
+        if (!chordSet.has(nombre)) {
           issues.push({
             level: 'error',
-            message: `El acorde "${tk.name}" no existe en tu tabla de acordes. Disponibles: ${opts.knownChords.join(', ') || '(ninguno)'}.`,
+            message: `El acorde "${nombre}" no existe en tu tabla de acordes. Disponibles: ${opts.knownChords.join(', ') || '(ninguno)'}.`,
           });
         } else {
-          chordEvents.push({ t: tidy(t), chord: tk.name, dur: tidy(tk.dur), dir: tk.dir ?? 'd' });
+          chordEvents.push({ t: tidy(t), chord: nombre, dur: tidy(tk.dur), dir: tk.dir ?? 'd' });
         }
       }
     } else if (!isRest) {
-      const base = pitchToMidi(tk.name);
-      if (base !== null) {
+      // Un token puede traer varias notas: todas arrancan en el mismo tiempo.
+      for (const name of tk.names) {
+        const base = pitchToMidi(name);
+        if (base === null) continue; // ya se avisó al resolver las alturas
         const midi = base + appliedShift;
         if (opts.target === 'backing') {
           backingEvents.push({ t: tidy(t), pitch: midiToPitch(midi), dur: tidy(tk.dur) });
@@ -392,14 +481,30 @@ export function parseNotation(
   };
 }
 
-/** Separa "G#4/.5:u" en sus tres partes. */
-function splitToken(piece: string): [string, string | undefined, string | undefined] {
+/** Separa "G#4/.5:u" o "[C3,E3,G3]/2" en nombre(s), duración y dirección. */
+function splitToken(piece: string): {
+  names: string[];
+  poly: boolean;
+  dur?: string;
+  dir?: string;
+} {
   const colon = piece.indexOf(':');
   const dir = colon === -1 ? undefined : piece.slice(colon + 1);
   const rest = colon === -1 ? piece : piece.slice(0, colon);
+  // Los corchetes no contienen "/", así que la primera barra siempre separa la duración.
   const slash = rest.indexOf('/');
-  if (slash === -1) return [rest, undefined, dir];
-  return [rest.slice(0, slash), rest.slice(slash + 1), dir];
+  const namePart = slash === -1 ? rest : rest.slice(0, slash);
+  const dur = slash === -1 ? undefined : rest.slice(slash + 1);
+
+  if (namePart.startsWith('[') && namePart.endsWith(']')) {
+    const names = namePart
+      .slice(1, -1)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return { names, poly: true, dur, dir };
+  }
+  return { names: namePart ? [namePart] : [], poly: false, dur, dir };
 }
 
 /* ---------------- Serialización (para el camino de vuelta) ---------------- */
