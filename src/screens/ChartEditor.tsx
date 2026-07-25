@@ -40,7 +40,8 @@ interface Props {
   chords: ChordRow[];
   canEdit: boolean;
   onBack: () => void;
-  onReload: () => Promise<void>;
+  /** Con el id, el listado refresca solo esa canción en vez de todo el catálogo. */
+  onReload: (songId?: string) => Promise<void>;
 }
 
 const STEPS: { value: number; label: string }[] = [
@@ -157,7 +158,8 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Solo songId y nuevoModo a propósito: cambiar de sub-nivel NO vuelve a
+    // consultar la base, relee la fila que ya está en memoria (cambiarDificultad).
   }, [songId, nuevoModo]);
 
   const bpb = beatsPerBar(song.time_sig);
@@ -356,7 +358,8 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Se engancha una sola vez: deshacer() lee siempre el historial más nuevo
+    // porque vive en un ref, no en el estado.
   }, []);
 
   /* ---------- atajos ---------- */
@@ -410,7 +413,8 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Faltan setEv/setMel adrede: se redefinen en cada render y volverían a
+    // enganchar el atajo en cada uno.
   }, [events, melody, playable, mode, selected]);
 
   /* ---------- herramientas ---------- */
@@ -574,7 +578,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
       setDirty(false);
       setSong(effectiveSong(fresh));
       setFlash(publish ? '🎉 Publicado: ya está en vivo para los alumnos.' : '💾 Borrador guardado (los alumnos todavía no lo ven).');
-      await onReload();
+      await onReload(sid);
     } catch (e) {
       setError(friendlyError(e));
     } finally {
@@ -593,7 +597,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
       setLoaded(fresh);
       setSong(effectiveSong(fresh));
       setFlash('Cambios de la ficha descartados.');
-      await onReload();
+      await onReload(id);
     } catch (e) {
       setError(friendlyError(e));
     } finally {
@@ -613,7 +617,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
       setLoaded(fresh);
       cargarCapas(fresh, mode, dificultad);
       setFlash('Borrador descartado.');
-      await onReload();
+      await onReload(id!);
     } catch (e) {
       setError(friendlyError(e));
     } finally {

@@ -1,6 +1,6 @@
 import { barLines, beatsPerBar } from '../lib/chartFormat';
 import type { BackingEvent, ChordEvent, MelodyEvent } from '../lib/chartFormat';
-import { MAX_PLAYABLE_MIDI, MIN_PLAYABLE_MIDI, STRING_MIDI, pitchToMidi } from '../lib/notation';
+import { MAX_PLAYABLE_MIDI, MIN_PLAYABLE_MIDI, pitchToMidi } from '../lib/notation';
 import { chordColor } from '../lib/colors';
 import { STRING_COLORS } from './MelodyGrid';
 
@@ -180,10 +180,4 @@ export function LevelOverview({
 export function largoDeCapas(chords: ChordEvent[], melody: MelodyEvent[], backing: BackingEvent[]) {
   const fin = (l: { t: number; dur: number }[]) => l.reduce((m, e) => Math.max(m, e.t + e.dur), 0);
   return { acordes: fin(chords), melodia: fin(melody), fondo: fin(backing) };
-}
-
-/** Nota que suena en la melodía en cada momento, para chequear contra el acorde. */
-export function melodyMidiAt(melody: MelodyEvent[], t: number): number | null {
-  const e = melody.find((n) => t >= n.t - 0.001 && t < n.t + n.dur - 0.001);
-  return e ? STRING_MIDI[e.string] + e.fret : null;
 }

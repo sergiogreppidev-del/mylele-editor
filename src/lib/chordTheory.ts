@@ -25,8 +25,10 @@ interface Quality {
   es: string;
 }
 
-// El orden importa: se prueba el sufijo más largo primero, para que "m7" no
-// se confunda con "m" y "maj7" no se confunda con "m".
+// El orden NO importa: la comparación de abajo es exacta, no por prefijo, así que
+// "m7" nunca se puede confundir con "m". Están agrupados por familia para poder
+// leerlos, nada más. (El comentario anterior decía lo contrario y frenaba a quien
+// quisiera tocarlo, haciéndole creer que había un riesgo que no existe.)
 const QUALITIES: [string, Quality][] = [
   ['maj7', { intervals: [0, 4, 7, 11], es: 'mayor séptima' }],
   ['dim7', { intervals: [0, 3, 6, 9], es: 'disminuido séptima' }],
@@ -45,6 +47,12 @@ const QUALITIES: [string, Quality][] = [
   ['7', { intervals: [0, 4, 7, 10], es: 'séptima' }],
   ['6', { intervals: [0, 4, 7, 9], es: 'sexta' }],
   ['+', { intervals: [0, 4, 8], es: 'aumentado' }],
+  // Habituales en ukelele que faltaban:
+  ['sus', { intervals: [0, 5, 7], es: 'sus4' }],   // "sus" a secas se usa como sus4
+  ['m7b5', { intervals: [0, 3, 6, 10], es: 'semidisminuido' }],
+  ['9', { intervals: [0, 4, 7, 10, 2], es: 'novena' }],
+  ['m9', { intervals: [0, 3, 7, 10, 2], es: 'menor novena' }],
+  ['madd9', { intervals: [0, 3, 7, 2], es: 'menor con novena' }],
   ['', { intervals: [0, 4, 7], es: 'mayor' }],
 ];
 
@@ -76,8 +84,16 @@ export function parseChordName(id: string): ParsedChord | null {
   const pitchClasses = quality.intervals.map((i) => (rootPc + i) % 12);
 
   // La fundamental pesa más porque es la que más se sostiene. La séptima pesa
-  // menos: aparece y desaparece según cómo se rasguee, y exigirla da falsos negativos.
-  const weights = pitchClasses.map((_, i) => (i === 0 ? 1.3 : i === 3 ? 0.9 : 1.0));
+  // menos: aparece y desaparece según cómo se rasguee, y exigirla da falsos
+  // negativos. Las extensiones (novena en adelante) pesan menos todavía.
+  //
+  // OJO: esto es un punto de partida razonable, NO una calibración. Los pesos del
+  // G que hay en la base ({1.0, 1.6, 0.5}) se midieron contra grabaciones reales y
+  // son muy distintos de lo que sale de acá. Por eso el editor no los recalcula al
+  // guardar un acorde que ya existe: los respeta.
+  const weights = pitchClasses.map((_, i) =>
+    i === 0 ? 1.3 : i === 3 ? 0.9 : i >= 4 ? 0.8 : 1.0,
+  );
 
   const rootName = m[1] + m[2];
   const nombreEs = `${NOMBRE_ES[m[1]] ?? m[1]}${m[2] === '#' ? ' sostenido' : m[2] === 'b' ? ' bemol' : ''} ${quality.es}`;

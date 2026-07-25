@@ -336,8 +336,12 @@ export async function duplicateSong(source: SongRow): Promise<SongRow> {
   const rows = combos
     .map((combo) => {
       const [mode, difficulty] = combo.split('|') as [AnyChartMode, Difficulty];
-      const same = source.charts.filter((c) => c.mode === mode && c.difficulty === difficulty);
-      const src = same.find((c) => c.published) ?? [...same].sort((a, b) => b.version - a.version)[0];
+      // Misma regla que en el resto: primero el publicado, después la versión más
+      // alta. Nunca "el primero de la lista": el orden que devuelve PostgREST no
+      // está garantizado y ya nos mordió una vez.
+      const src =
+        pick.publishedChart(source.charts, mode, difficulty) ??
+        pick.workingChart(source.charts, mode, difficulty);
       if (!src) return null;
       return {
         song_id: created.id,

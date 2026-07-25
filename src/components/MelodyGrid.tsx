@@ -64,7 +64,7 @@ export function MelodyGrid({
   useEffect(() => {
     if (!drag) return;
 
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (ev: PointerEvent) => {
       const next = [...events];
       const cur = next[drag.index];
       if (!cur) return;
@@ -99,13 +99,15 @@ export function MelodyGrid({
     };
 
     const onUp = () => setDrag(null);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
     return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // La lista es corta a propósito: onChange se redefine en cada render.
   }, [drag, events, pxPerBeat, step, totalBeats]);
 
   function handleClick(ev: React.MouseEvent) {
@@ -163,8 +165,8 @@ export function MelodyGrid({
             className="mel-lanes"
             style={{ width, height: LANE_H * 4 }}
             onClick={handleClick}
-            onMouseMove={(e) => setHover(posFrom(e.clientX, e.clientY))}
-            onMouseLeave={() => setHover(null)}
+            onPointerMove={(e) => setHover(posFrom(e.clientX, e.clientY))}
+            onPointerLeave={() => setHover(null)}
           >
             {UKE_STRINGS.map((s, i) => (
               <div key={s} className="mel-lane" style={{ top: i * LANE_H, height: LANE_H }} />
@@ -204,7 +206,7 @@ export function MelodyGrid({
                     ev.stopPropagation();
                     onSelect(i);
                   }}
-                  onMouseDown={(ev) => {
+                  onPointerDown={(ev) => {
                     ev.stopPropagation();
                     onSelect(i);
                     setDrag({ kind: 'move', index: i, startX: ev.clientX, startT: e.t });
@@ -214,7 +216,7 @@ export function MelodyGrid({
                   {e.fret}
                   <span
                     className="handle"
-                    onMouseDown={(ev) => {
+                    onPointerDown={(ev) => {
                       ev.stopPropagation();
                       onSelect(i);
                       setDrag({ kind: 'resize', index: i, startX: ev.clientX, startDur: e.dur });

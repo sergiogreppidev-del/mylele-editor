@@ -49,7 +49,7 @@ export function BeatGrid({
   useEffect(() => {
     if (!drag) return;
 
-    const onMove = (ev: MouseEvent) => {
+    const onMove = (ev: PointerEvent) => {
       const dxBeats = (ev.clientX - drag.startX) / pxPerBeat;
       const next = [...events];
       const cur = next[drag.index];
@@ -75,11 +75,13 @@ export function BeatGrid({
     };
 
     const onUp = () => setDrag(null);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
     return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
     };
   }, [drag, events, onChange, pxPerBeat, step, totalBeats]);
 
@@ -148,8 +150,8 @@ export function BeatGrid({
           className="lane"
           style={{ width }}
           onClick={handleLaneClick}
-          onMouseMove={(e) => setHoverBeat(beatFromEvent(e.clientX))}
-          onMouseLeave={() => setHoverBeat(null)}
+          onPointerMove={(e) => setHoverBeat(beatFromEvent(e.clientX))}
+          onPointerLeave={() => setHoverBeat(null)}
         >
           {lines}
 
@@ -184,7 +186,7 @@ export function BeatGrid({
                   ev.stopPropagation();
                   onSelect(i);
                 }}
-                onMouseDown={(ev) => {
+                onPointerDown={(ev) => {
                   ev.stopPropagation();
                   onSelect(i);
                   setDrag({ kind: 'move', index: i, startX: ev.clientX, startT: e.t });
@@ -195,7 +197,7 @@ export function BeatGrid({
                 <span className="dir">{e.dir === 'u' ? '↑ arriba' : '↓ abajo'}</span>
                 <span
                   className="handle"
-                  onMouseDown={(ev) => {
+                  onPointerDown={(ev) => {
                     ev.stopPropagation();
                     onSelect(i);
                     setDrag({ kind: 'resize', index: i, startX: ev.clientX, startDur: e.dur });

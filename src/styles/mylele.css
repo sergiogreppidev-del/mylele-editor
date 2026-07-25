@@ -142,14 +142,15 @@ input.f[type='checkbox'] { width: 22px; height: 22px; accent-color: var(--grape)
 }
 .bar-ruler .bar:last-child { border-right: 3px solid var(--ink); }
 
+/* touch-action: sin esto, arrastrar con el dedo scrollea la página en vez de
+   mover el evento, y en tablet no se puede editar nada. */
+.lane, .mel-lanes { touch-action: none; }
 .lane {
   position: relative; height: 74px; background: var(--cream);
   border: 3px solid var(--ink); border-radius: 16px; overflow: hidden;
 }
 .lane .beat-line { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(58,42,99,.18); }
 .lane .beat-line.bar { width: 3px; background: rgba(58,42,99,.55); }
-.lane .beat-hit { position: absolute; top: 0; bottom: 0; cursor: pointer; }
-.lane .beat-hit:hover { background: rgba(79,201,245,.28); }
 
 .ev {
   position: absolute; top: 7px; bottom: 7px;

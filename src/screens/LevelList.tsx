@@ -15,7 +15,7 @@ interface Props {
   canEdit: boolean;
   /** Al crear, el tipo va decidido desde acá: es por dónde se entra. */
   onOpen: (songId: string | null, nuevoModo?: ChartMode) => void;
-  onReload: () => Promise<void>;
+  onReload: (songId?: string) => Promise<void>;
 }
 
 type State = 'live' | 'draft' | 'changed';

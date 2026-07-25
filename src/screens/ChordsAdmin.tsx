@@ -14,7 +14,7 @@ interface Props {
   songs: SongRow[];
   canEdit: boolean;
   onBack: () => void;
-  onReload: () => Promise<void>;
+  onReload: (songId?: string) => Promise<void>;
 }
 
 const VACIO: ChordRow = {

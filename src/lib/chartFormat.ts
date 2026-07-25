@@ -27,9 +27,14 @@ export const BACKING_MODE = 'backing';
  *     Todavía no está definido qué usan las otras dos, así que no existe en el
  *     código: cuando se defina, va a necesitar su propia columna.
  *
- *   SUB-NIVEL (esto) — dentro de una etapa, con el MISMO vocabulario, cambia
- *     cuántos acordes por compás toca el alumno. Es lo único que separa a estos
- *     dos, y es lo único que hay que cambiarle a la IA al pedirle la canción.
+ *   SUB-NIVEL (esto) — dentro de una etapa, cambia qué se le pide a la MANO
+ *     IZQUIERDA: cuántas formas distintas, cuáles, y cada cuánto pueden cambiar.
+ *     Los topes concretos están en PERFILES (dificultad.ts), medidos contra los
+ *     niveles reales. Una canción vive en UN sub-nivel, no en los dos: elegirlo
+ *     es la forma de decirle a la IA qué se quiere.
+ *
+ * El rasgueo (mano derecha) es un eje aparte y NO entra acá: se midió que
+ * rasguear el doble no le agrega ningún trabajo a la mano que forma los acordes.
  */
 export type Difficulty = 'facil' | 'dificil';
 
@@ -37,13 +42,9 @@ export type Difficulty = 'facil' | 'dificil';
 export const ETAPA_ACTUAL = 'Fácil';
 
 export const DIFICULTADES: { id: Difficulty; label: string; detalle: string }[] = [
-  { id: 'facil', label: 'Fácil 1', detalle: 'un acorde por compás' },
-  { id: 'dificil', label: 'Fácil 2', detalle: 'hasta dos acordes por compás' },
+  { id: 'facil', label: 'Fácil 1', detalle: 'pocos acordes, cambios espaciados' },
+  { id: 'dificil', label: 'Fácil 2', detalle: 'los cuatro acordes, cambios más seguidos' },
 ];
-
-export function dificultadLabel(d: Difficulty): string {
-  return DIFICULTADES.find((x) => x.id === d)?.label ?? d;
-}
 export type AnyChartMode = ChartMode | typeof BACKING_MODE;
 export type StrumDir = 'd' | 'u';
 export type UkeString = 'G' | 'C' | 'E' | 'A';

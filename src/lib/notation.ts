@@ -53,10 +53,6 @@ export function midiToPitch(midi: number): string {
   return NOTE_NAMES[pc] + octave;
 }
 
-/** Solo el nombre de la nota, sin octava — que es lo que detecta el motor de audio. */
-export function midiToNoteName(midi: number): string {
-  return NOTE_NAMES[((midi % 12) + 12) % 12];
-}
 
 /* ---------------- Nota → cuerda y traste ---------------- */
 
