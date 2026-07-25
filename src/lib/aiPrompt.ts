@@ -157,17 +157,27 @@ export function buildAiPrompt(o: PromptOptions): string {
   const bpb = o.imponerMedida ? o.beatsPerBar : 4;
   if (o.target === 'chords') {
     partes.push(
-      'EJEMPLO (fijate que el tercer compás cambia de acorde en la mitad)',
+      'MINIEJEMPLO DE LA FORMA — 4 compases inventados, NO es tu respuesta.',
+      'Fijate que el tercero cambia de acorde en la mitad.',
       ...(o.imponerMedida ? [] : ['BPM: 92', 'COMPAS: 4/4']),
       `| C/${bpb} | Am/${bpb} | F/${bpb / 2} C/${bpb / 2} | G/${bpb} |`,
     );
   } else {
     partes.push(
-      'EJEMPLO',
+      'MINIEJEMPLO DE LA FORMA — 3 compases inventados, NO es tu respuesta.',
       ...(o.imponerMedida ? [] : ['BPM: 120', 'COMPAS: 3/4']),
       '| G4/.5 G4/.5 | A4/1 G4/1 C5/1 | B4/2 r/1 |',
     );
   }
+
+  partes.push(
+    '',
+    'ESCRIBILO COMPLETO',
+    'El miniejemplo es corto porque muestra la forma, no porque las canciones duren eso.',
+    'Escribí de principio a fin, sin abreviar: nada de "...", "etc." ni "(se repite)". Si una',
+    'parte se repite, escribila de nuevo entera. Si te queda largo, podés usar varios renglones.',
+    'No pidas confirmación ni ofrezcas continuar: entregá el resultado terminado.',
+  );
 
   return partes.join('\n');
 }
@@ -235,8 +245,8 @@ function promptNivelCompleto(o: PromptOptions): string {
     '  Un compás de más o de menos corre todo lo que viene después y arruina la canción entera.',
     '',
     'REGLAS',
-    '- Las tres capas tienen que durar LO MISMO y estar alineadas: el acorde del compás 3 tiene',
-    '  que corresponder a lo que suena en el compás 3 de la melodía. Si hay anacrusa, las tres',
+    '- Las CUATRO capas tienen que durar LO MISMO y estar alineadas: el acorde del compás 3 tiene',
+    '  que corresponder a lo que suena en el compás 3 de la melodía. Si hay anacrusa, las cuatro',
     '  capas la comparten.',
     `- ACORDES: usá únicamente estos: ${acordes}. Si la canción pide otro, poné el más parecido`,
     '  (G7 -> G, Dm -> Am). Cada acorde va DONDE REALMENTE CAMBIA la armonía, aunque cambie en la',
@@ -247,28 +257,38 @@ function promptNivelCompleto(o: PromptOptions): string {
     '- ACOMP: registro medio, C3 a C6. Para que suenen varias notas juntas se escriben entre',
     '  corchetes: "[C3,E3,G3]/2". Podés mezclar notas sueltas y corchetes en el mismo renglón.',
     '',
-    'FORMATO DE SALIDA (obligatorio)',
+    'FORMATO DE SALIDA',
     'Los tiempos se miden en TIEMPOS (beats): 1 = negra, .5 = corchea, 2 = blanca, 1.5 = con puntillo.',
     '"r/1" es un silencio. "|" separa compases; poné una barra al final de cada compás.',
     'NO escribas tiempos de inicio ni números de compás: se calculan solos sumando las duraciones.',
-    'Respondé exactamente con esta forma, sin explicaciones ni bloque de código:',
     '',
-    'BPM: <número entre 40 y 200>',
-    'COMPAS: <por ejemplo 4/4, 3/4 o 6/8>',
-    'MELODIA: <una línea>',
-    'BAJO: <una línea>',
-    'ACOMP: <una línea>',
-    'ACORDES: <una línea>',
-    '',
-    'EJEMPLO — el arranque de "Feliz cumpleaños", que tiene anacrusa',
-    'Fijate en dos cosas: el primer compás tiene UN solo tiempo (las dos corcheas de "Fe-liz") y',
-    'el tiempo fuerte cae recién en el segundo compás; y el bajo se mueve (C2, G2, E2) en vez de',
-    'repetir la fundamental, mientras el acompañamiento arpegia en lugar de golpear bloques.',
+    'MINIEJEMPLO DE LA FORMA — son 3 compases inventados, NO es una canción ni es tu respuesta.',
+    'Está solo para que veas cómo se escribe: el primer compás es una anacrusa de un tiempo, el',
+    'bajo se mueve en vez de repetir la fundamental y el acompañamiento arpegia.',
     'BPM: 120',
     'COMPAS: 3/4',
     'MELODIA: | G4/.5 G4/.5 | A4/1 G4/1 C5/1 | B4/2 r/1 |',
     'BAJO: | r/1 | C2/1 G2/1 E2/1 | G2/2 G2/1 |',
     'ACOMP: | r/1 | r/1 [E3,G3]/1 [C4,E4]/1 | [D3,G3]/2 r/1 |',
     'ACORDES: | r/1 | C/3 | G/3 |',
+    '',
+    'ESCRIBÍ LA CANCIÓN ENTERA',
+    'Ese miniejemplo tiene 3 compases porque muestra la forma, no porque las canciones duren eso.',
+    'Vos tenés que escribir la canción COMPLETA, del primer compás al último.',
+    '- Prohibido abreviar: nada de "...", "etc.", "(se repite)", "(igual que antes)" ni resúmenes.',
+    '  Si una parte se repite, escribila de nuevo entera, compás por compás.',
+    '- Si una capa te queda muy larga, podés partirla en varios renglones: todo lo que va después',
+    '  de "MELODIA:" y antes del siguiente nombre de capa cuenta como esa capa.',
+    '- No pidas confirmación ni ofrezcas continuar después: entregá la canción terminada.',
+    '',
+    'ANTES DE RESPONDER, VERIFICÁ (y corregí si hace falta)',
+    '1. ¿Están los seis renglones? BPM, COMPAS, MELODIA, BAJO, ACOMP y ACORDES.',
+    '2. ¿Las cuatro capas tienen la MISMA cantidad de compases y suman los mismos tiempos?',
+    '3. ¿Cada compás suma exactamente los tiempos del compás, salvo el primero y el último?',
+    '4. ¿Está la canción completa, sin abreviar ninguna repetición?',
+    '',
+    'RESPUESTA',
+    'Devolvé solamente esos seis renglones, sin explicaciones, sin comentarios y sin bloque de',
+    'código. Empezá directamente con "BPM:".',
   ].join('\n');
 }

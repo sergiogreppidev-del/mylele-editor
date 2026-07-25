@@ -228,6 +228,23 @@ console.log('\n=== El pedido pide un arreglo, no un metrónomo ===');
   check('pide que el bajo se mueva', /BAJO: que se mueva/.test(pa));
   check('pide arpegios en vez de bloques', /arpegios en vez de bloques/.test(pa));
   check('pide las cuatro capas', /MELODIA:/.test(pa) && /BAJO:/.test(pa) && /ACOMP:/.test(pa) && /ACORDES:/.test(pa));
+
+  // Lo que causaba las respuestas incompletas: el ejemplo era la misma canción
+  // pedida, de 3 compases, y era lo último que leía el modelo.
+  check('no dice "tres capas" en ningún lado', !/tres capas/i.test(pa));
+  check('el ejemplo se presenta como miniejemplo, no como respuesta', /NO es tu respuesta|NO es una canci[oó]n ni es tu respuesta/.test(pa));
+  check('pide la canción entera', /ESCRIB[IÍ] LA CANCI[OÓ]N ENTERA/.test(pa));
+  check('prohíbe abreviar', /se repite/.test(pa) && /Prohibido abreviar/.test(pa));
+  check('permite partir una capa en varios renglones', /varios renglones/.test(pa));
+  check('tiene verificación final', /ANTES DE RESPONDER, VERIFIC/.test(pa));
+  check('la verificación va después del ejemplo',
+    pa.indexOf('ANTES DE RESPONDER') > pa.indexOf('MINIEJEMPLO'));
+  check('lo último es la instrucción de respuesta', pa.trim().endsWith('Empezá directamente con "BPM:".'));
+
+  // Los pedidos de una sola capa tenían el mismo anclaje.
+  const p1c = P3.buildAiPrompt({ target: 'chords', title: 'T', bpm: 80, timeSig: '4/4', beatsPerBar: 4,
+                                 bars: 8, knownChords: ['C', 'F'], pedido: 'x', imponerMedida: false });
+  check('una capa sola también pide completo', /ESCRIBILO COMPLETO/.test(p1c) && /NO es tu respuesta/.test(p1c));
 }
 
 console.log('\n=== El pedido que se le manda a la IA ===');
