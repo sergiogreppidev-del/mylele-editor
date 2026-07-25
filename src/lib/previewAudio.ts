@@ -157,8 +157,10 @@ export class PreviewAudio {
       const freqs = this.chordFreqs(pcs, 4);
       const order = e.dir === 'u' ? [...freqs].reverse() : freqs;
       const spread = Math.min(0.03, beatDur * 0.12);
+      // Sin doblar la octava y bien atrás en la mezcla: antes caía justo encima
+      // del registro de la melodía y la tapaba.
       order.forEach((f, i) => {
-        this.playSynth(at + i * spread, f * 2, Math.min(0.45, beatDur * e.dur), 'triangle', 0.13);
+        this.playSynth(at + i * spread, f, Math.min(0.35, beatDur * e.dur), 'triangle', 0.07);
       });
     }
   }
@@ -168,22 +170,54 @@ export class PreviewAudio {
    * para que se distinga de lo que el alumno tiene que tocar.
    */
   private scheduleBackingMelody(notes: BackingEvent[], startTime: number, countInBeats: number, beatDur: number) {
-    // El fondo es polifónico: si tres notas arrancan juntas, sus amplitudes se suman
-    // y satura. Se reparte el volumen entre las voces que suenan a la vez.
+    // Cuántas notas de relleno arrancan juntas: solo el acompañamiento se reparte
+    // el volumen. La melodía y el bajo mantienen el suyo, si no quedan enterrados.
     const juntas = new Map<number, number>();
     for (const n of notes) {
+      if ((n.v ?? 'acomp') !== 'acomp') continue;
       const k = Math.round(n.t * 1000);
       juntas.set(k, (juntas.get(k) ?? 0) + 1);
     }
+
     for (const n of notes) {
       const midi = pitchToMidi(n.pitch);
       if (midi === null) continue;
-      const voces = juntas.get(Math.round(n.t * 1000)) ?? 1;
       const freq = 440 * Math.pow(2, (midi - 69) / 12);
       const at = startTime + (countInBeats + n.t) * beatDur;
-      // 0.9 en vez de 1: deja un respiro entre notas para que no suene ligado.
-      this.playSynth(at, freq, Math.max(0.08, n.dur * beatDur * 0.9), 'sine', 0.2 / Math.sqrt(voces));
+      const largo = n.dur * beatDur;
+      const voz = n.v ?? 'acomp';
+
+      if (voz === 'lead') {
+        // La melodía manda: onda con armónicos, más fuerte y sostenida.
+        this.playVoice(at, freq, Math.max(0.12, largo * 0.92), 'triangle', 0.34, 0.012);
+      } else if (voz === 'bass') {
+        this.playVoice(at, freq, Math.max(0.1, largo * 0.8), 'sine', 0.3, 0.008);
+      } else {
+        const n_ = juntas.get(Math.round(n.t * 1000)) ?? 1;
+        this.playVoice(at, freq, Math.max(0.08, largo * 0.7), 'triangle', 0.11 / Math.sqrt(n_), 0.006);
+      }
     }
+  }
+
+  /** Como playSynth pero con ataque configurable, para diferenciar los timbres. */
+  private playVoice(
+    time: number, freq: number, dur: number,
+    type: OscillatorType, peak: number, attack: number,
+  ) {
+    const ctx = this.ensureCtx();
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, time);
+    g.gain.exponentialRampToValueAtTime(peak, time + attack);
+    // Cae al 60% y recién ahí se apaga: da cuerpo en vez de un "pip" que se muere.
+    g.gain.exponentialRampToValueAtTime(peak * 0.6, time + Math.min(dur * 0.4, 0.25));
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    osc.connect(g);
+    g.connect(this.master!);
+    osc.start(time);
+    osc.stop(time + dur + 0.03);
   }
 
   /**

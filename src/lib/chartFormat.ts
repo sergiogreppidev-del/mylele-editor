@@ -38,6 +38,13 @@ export interface MelodyEvent {
 export type ChartEvent = ChordEvent | MelodyEvent;
 
 /**
+ * Rol de cada nota del acompañamiento. Existe para que la mezcla no trate a
+ * todas las notas por igual: sin esto, la melodía queda enterrada entre los
+ * acordes y la canción no se reconoce aunque las notas estén bien.
+ */
+export type Voice = 'lead' | 'bass' | 'acomp';
+
+/**
  * Nota del acompañamiento. Guarda la ALTURA (`pitch`) y no la digitación,
  * porque no la toca nadie: la sintetiza la app. Por eso puede estar en
  * cualquier octava, sin la restricción de trastes del ukelele.
@@ -46,6 +53,8 @@ export interface BackingEvent {
   t: number;
   pitch: string;
   dur: number;
+  /** Si falta, se trata como acompañamiento. */
+  v?: Voice;
 }
 
 export function isChordEvent(e: ChartEvent): e is ChordEvent {
@@ -269,10 +278,12 @@ export function serializeEvents(events: ChartEvent[]): ChartEvent[] {
     );
 }
 
+const VOCES: Voice[] = ['lead', 'bass', 'acomp'];
+
 export function serializeBacking(events: BackingEvent[]): BackingEvent[] {
   return [...events]
     .sort((a, b) => a.t - b.t)
-    .map((e) => ({ t: tidy(e.t), pitch: e.pitch, dur: tidy(e.dur) }));
+    .map((e) => ({ t: tidy(e.t), pitch: e.pitch, dur: tidy(e.dur), v: e.v ?? 'acomp' }));
 }
 
 export function parseBacking(raw: unknown): BackingEvent[] {
@@ -280,7 +291,8 @@ export function parseBacking(raw: unknown): BackingEvent[] {
   const out: BackingEvent[] = [];
   for (const r of raw as Record<string, unknown>[]) {
     if (!r || typeof r !== 'object' || typeof r.pitch !== 'string') continue;
-    out.push({ t: Number(r.t) || 0, pitch: r.pitch, dur: Number(r.dur) || 1 });
+    const v = VOCES.includes(r.v as Voice) ? (r.v as Voice) : 'acomp';
+    out.push({ t: Number(r.t) || 0, pitch: r.pitch, dur: Number(r.dur) || 1, v });
   }
   return out;
 }

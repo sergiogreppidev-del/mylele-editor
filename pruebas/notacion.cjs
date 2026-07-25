@@ -102,7 +102,7 @@ console.log('\n=== El pedido pide anacrusa y ritmo real ===');
   check('usa Feliz cumpleaños como ejemplo', /Feliz cumplea/.test(pn) && /G4\/\.5 G4\/\.5/.test(pn));
   check('avisa que un compás corrido arruina todo', /corre todo lo que viene después/.test(pn));
   check('pide el ritmo real, no notas iguales', /no todas las notas iguales/.test(pn));
-  check('pide las tres capas', /FONDO:/.test(pn) && /MELODIA:/.test(pn) && /ACORDES:/.test(pn));
+  check('pide las cuatro capas', /MELODIA:/.test(pn) && /BAJO:/.test(pn) && /ACOMP:/.test(pn) && /ACORDES:/.test(pn));
 }
 
 console.log('\n=== Basura ===');
@@ -196,6 +196,39 @@ const rnm = N.parseNotation(nivelMal, { target: 'chords', beatsPerBar: 4, knownC
 check('el aviso dice de qué capa es',
   rnm.issues.some((i) => /^Acordes · /.test(i.message)),
   JSON.stringify(rnm.issues.map((i) => i.message)));
+
+console.log('\n=== Voces del fondo (melodía, bajo, acompañamiento) ===');
+const conVoces = [
+  'COMPAS: 3/4',
+  'MELODIA: | G4/1 A4/1 B4/1 |',
+  'BAJO:    | C2/1 G2/1 E2/1 |',
+  'ACOMP:   | r/1 [E3,G3]/1 [C4,E4]/1 |',
+].join('\n');
+const rv = N.parseNotation(conVoces, { target: 'backing', beatsPerBar: 3, knownChords: [] });
+check('sin errores', rv.issues.filter((i) => i.level === 'error').length === 0,
+  JSON.stringify(rv.issues.map((i) => i.message)));
+const bajo = rv.backingEvents.filter((e) => e.v === 'bass');
+const acomp = rv.backingEvents.filter((e) => e.v === 'acomp');
+check('el bajo queda marcado como bass', bajo.length === 3, String(bajo.length));
+check('el acompañamiento queda marcado como acomp', acomp.length === 4, String(acomp.length));
+check('la melodía va a su propia capa, no al fondo', rv.melodyEvents.length === 3 && rv.backingEvents.length === 7,
+  `mel=${rv.melodyEvents.length} fondo=${rv.backingEvents.length}`);
+check('FONDO sin voz explícita cuenta como acompañamiento',
+  N.parseNotation('FONDO: | C3/1 |', { target: 'backing', beatsPerBar: 1, knownChords: [] })
+    .backingEvents[0].v === 'acomp');
+
+console.log('\n=== El pedido pide un arreglo, no un metrónomo ===');
+{
+  const P3 = require('./build/aiPrompt.js');
+  const pa = P3.buildAiPrompt({ target: 'nivel', title: 'T', bpm: 80, timeSig: '3/4', beatsPerBar: 3,
+                                bars: 8, knownChords: ['C', 'F', 'G'], pedido: 'x', imponerMedida: false });
+  check('separa la música del juego', /MELODIA \+ BAJO \+ ACOMP son LA M[UÚ]SICA/.test(pa));
+  check('dice que la música no tiene límite de dificultad', /ninguna limitaci[oó]n de dificultad/.test(pa));
+  check('advierte contra el metrónomo con alturas', /met[rn][oó]nomo con alturas|suena a metr[oó]nomo/.test(pa));
+  check('pide que el bajo se mueva', /BAJO: que se mueva/.test(pa));
+  check('pide arpegios en vez de bloques', /arpegios en vez de bloques/.test(pa));
+  check('pide las cuatro capas', /MELODIA:/.test(pa) && /BAJO:/.test(pa) && /ACOMP:/.test(pa) && /ACORDES:/.test(pa));
+}
 
 console.log('\n=== El pedido que se le manda a la IA ===');
 const P = require('./build/aiPrompt.js');

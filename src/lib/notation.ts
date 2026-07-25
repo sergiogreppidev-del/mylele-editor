@@ -17,7 +17,7 @@
    La duración es opcional y por defecto vale 1 tiempo.
    =================================================================== */
 
-import type { BackingEvent, ChordEvent, Issue, MelodyEvent, UkeString } from './chartFormat';
+import type { BackingEvent, ChordEvent, Issue, MelodyEvent, UkeString, Voice } from './chartFormat';
 import { MAX_FRET, tidy } from './chartFormat';
 
 /* ---------------- Alturas ---------------- */
@@ -216,11 +216,21 @@ export interface ParseOptions {
   autoTranspose?: boolean;
 }
 
-const SECCION_RE = /^\s*(fondo|backing|melod[ií]a|melody|acordes|chords)\s*:\s*(.*)$/i;
-const SECCION_TARGET: Record<string, NotationTarget> = {
-  fondo: 'backing', backing: 'backing',
-  melodia: 'melody', 'melodía': 'melody', melody: 'melody',
-  acordes: 'chords', chords: 'chords',
+const SECCION_RE = /^\s*(fondo|backing|bajo|bass|acomp|acompa[nñ]amiento|melod[ií]a|melody|acordes|chords)\s*:\s*(.*)$/i;
+
+/**
+ * Cada sección va a una capa y, si es del acompañamiento, con qué rol suena.
+ * Los roles existen para que la mezcla no trate a todas las notas por igual:
+ * la melodía tiene que destacarse por encima del bajo y del relleno.
+ */
+const SECCION_DEST: Record<string, { target: NotationTarget; voice?: Voice }> = {
+  melodia: { target: 'melody' }, 'melodía': { target: 'melody' }, melody: { target: 'melody' },
+  bajo: { target: 'backing', voice: 'bass' }, bass: { target: 'backing', voice: 'bass' },
+  acomp: { target: 'backing', voice: 'acomp' },
+  acompanamiento: { target: 'backing', voice: 'acomp' },
+  'acompañamiento': { target: 'backing', voice: 'acomp' },
+  fondo: { target: 'backing', voice: 'acomp' }, backing: { target: 'backing', voice: 'acomp' },
+  acordes: { target: 'chords' }, chords: { target: 'chords' },
 };
 const SECCION_LABEL: Record<NotationTarget, string> = {
   chords: 'Acordes',
@@ -240,14 +250,24 @@ const SECCION_LABEL: Record<NotationTarget, string> = {
  * Sin encabezados de sección, todo el texto es una sola capa —la del `target`
  * que pidió quien llama—, que es como funcionaba antes.
  */
-function splitSections(text: string, target: NotationTarget): { target: NotationTarget; body: string }[] {
-  const out: { target: NotationTarget; body: string[] }[] = [];
-  let actual: { target: NotationTarget; body: string[] } | null = null;
+interface Seccion {
+  target: NotationTarget;
+  voice?: Voice;
+  body: string[];
+}
+
+function splitSections(
+  text: string,
+  target: NotationTarget,
+): { target: NotationTarget; voice?: Voice; body: string }[] {
+  const out: Seccion[] = [];
+  let actual: Seccion | null = null;
 
   for (const line of text.split('\n')) {
     const m = SECCION_RE.exec(line);
     if (m) {
-      actual = { target: SECCION_TARGET[m[1].toLowerCase()], body: m[2] ? [m[2]] : [] };
+      const dest = SECCION_DEST[m[1].toLowerCase()];
+      actual = { target: dest.target, voice: dest.voice, body: m[2] ? [m[2]] : [] };
       out.push(actual);
     } else if (actual) {
       actual.body.push(line);
@@ -257,7 +277,7 @@ function splitSections(text: string, target: NotationTarget): { target: Notation
       out.push(actual);
     }
   }
-  return out.map((s) => ({ target: s.target, body: s.body.join('\n') }));
+  return out.map((s) => ({ target: s.target, voice: s.voice, body: s.body.join('\n') }));
 }
 
 /** Convierte el texto en eventos con sus tiempos ya calculados. */
@@ -280,7 +300,7 @@ export function parseNotation(text: string, opts: ParseOptions): ParsedNotation 
   // Cada capa se analiza por separado y después se juntan los resultados. Con
   // varias capas, los avisos se etiquetan para saber cuál de las tres falló.
   return secciones.reduce<ParsedNotation>((acc, s) => {
-    const r = parseLayer(s.body, { ...opts, target: s.target }, beatsPerBarUsed);
+    const r = parseLayer(s.body, { ...opts, target: s.target }, beatsPerBarUsed, s.voice);
     const etiqueta = secciones.length > 1 ? SECCION_LABEL[s.target] + ' · ' : '';
     return {
       ...acc,
@@ -295,7 +315,12 @@ export function parseNotation(text: string, opts: ParseOptions): ParsedNotation 
 }
 
 /** Analiza UNA capa. La cabecera ya viene sacada y el compás ya está resuelto. */
-function parseLayer(text: string, opts: ParseOptions, beatsPerBarUsed: number): ParsedNotation {
+function parseLayer(
+  text: string,
+  opts: ParseOptions,
+  beatsPerBarUsed: number,
+  voice: Voice = 'acomp',
+): ParsedNotation {
   const issues: Issue[] = [];
   const chordEvents: ChordEvent[] = [];
   const melodyEvents: MelodyEvent[] = [];
@@ -477,7 +502,7 @@ function parseLayer(text: string, opts: ParseOptions, beatsPerBarUsed: number): 
         if (base === null) continue; // ya se avisó al resolver las alturas
         const midi = base + appliedShift;
         if (opts.target === 'backing') {
-          backingEvents.push({ t: tidy(t), pitch: midiToPitch(midi), dur: tidy(tk.dur) });
+          backingEvents.push({ t: tidy(t), pitch: midiToPitch(midi), dur: tidy(tk.dur), v: voice });
         } else {
           const tab = midiToTab(midi);
           if (!tab) {

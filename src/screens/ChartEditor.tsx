@@ -1110,6 +1110,7 @@ export function ChartEditor({ songId, chords, canEdit, onBack, onReload }: Props
                     t: n.t,
                     pitch: midiToPitch(STRING_MIDI[n.string] + n.fret),
                     dur: n.dur,
+                    v: 'lead' as const, // es la melodía: tiene que destacarse
                   }))
                 : [];
               setMode(tocaAcordes ? 'chords' : 'melody');
