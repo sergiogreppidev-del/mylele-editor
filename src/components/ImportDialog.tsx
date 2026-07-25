@@ -58,10 +58,14 @@ export function ImportDialog(props: Props) {
   const esNivelCompleto = target === 'nivel';
 
   /**
-   * El sub-nivel solo cambia la capa que toca el alumno, y hoy eso son los acordes.
-   * Pedirlo cuando se importa una melodía o el fondo sería una perilla que no hace nada.
+   * El sub-nivel le cambia las reglas a la IA solo cuando hay acordes de por medio.
+   * En un nivel de notas todavía no cambia el pedido —la melodía ES la canción y
+   * recortarla la haría irreconocible—, pero el chart igual se guarda en uno de los
+   * dos, así que el selector tiene que estar a la vista: si no, se elige solo.
+   * El fondo no lleva sub-nivel: siempre se guarda en el mismo.
    */
-  const eligeDificultad = esNivelCompleto || target === 'chords';
+  const afectaAlPedido = esNivelCompleto || target === 'chords';
+  const eligeDificultad = afectaAlPedido || target === 'melody';
   const difActual = DIFICULTADES.find((d) => d.id === props.dificultad);
 
   /** La capa que se está importando, tal como está ahora. */
@@ -225,12 +229,24 @@ export function ImportDialog(props: Props) {
                     {d.label}
                   </CandyButton>
                 ))}
-                <span className="muted grow">→ {difActual?.detalle}</span>
+                <span className="muted grow">
+                  → {afectaAlPedido ? difActual?.detalle : 'dónde se guarda lo que generes'}
+                </span>
               </div>
               <p className="muted" style={{ margin: '6px 0 0' }}>
-                Etapa <b>{ETAPA_ACTUAL}</b> · {knownChords.length} acordes ({knownChords.join(', ')}).
-                Los dos sub-niveles usan los mismos acordes: lo único que cambia es cuántos entran
-                por compás. <b>La música de fondo es idéntica en los dos.</b>
+                {afectaAlPedido ? (
+                  <>
+                    Etapa <b>{ETAPA_ACTUAL}</b> · {knownChords.length} acordes ({knownChords.join(', ')}).
+                    Los dos sub-niveles usan los mismos acordes: lo único que cambia es cuántos entran
+                    por compás. <b>La música de fondo es idéntica en los dos.</b>
+                  </>
+                ) : (
+                  <>
+                    En un nivel de <b>notas</b> los dos sub-niveles todavía piden lo mismo: la melodía
+                    <i> es</i> la canción, y sacarle notas para hacerla más fácil la vuelve
+                    irreconocible. Lo que elijas acá decide <b>en cuál de los dos se guarda</b>.
+                  </>
+                )}
               </p>
             </div>
           )}

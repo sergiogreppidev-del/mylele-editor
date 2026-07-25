@@ -50,6 +50,26 @@ Una sola línea con elementos separados por espacios.
 
 const SOLO_LA_LINEA = `Respondé ÚNICAMENTE con eso, sin explicaciones, sin comillas y sin bloque de código.`;
 
+/* Estas tres cosas se escribieron para el pedido del nivel entero y solo vivían ahí.
+   Pero un pedido de una sola capa las necesita igual: sin la anacrusa, "Feliz
+   cumpleaños" arranca en el tiempo fuerte, el acento cae en la sílaba equivocada y
+   la canción no se reconoce aunque las notas sean las correctas. */
+const RITMO_TITULO = 'RITMO — esto es lo que más se equivoca, leelo con atención';
+const RITMO_REAL = [
+  '- Escribí el ritmo REAL de la canción, no todas las notas iguales. Si dos sílabas son',
+  '  corcheas, van /.5 cada una; si una nota se sostiene tres tiempos, va /3.',
+];
+const RITMO_COMPASES = [
+  '- ANACRUSA: muchas canciones no empiezan en el tiempo fuerte. Si la tuya arranca antes,',
+  '  escribí ese arranque como un PRIMER COMPÁS CORTO. El caso típico es "Feliz cumpleaños":',
+  '  el "Fe-liz" son dos corcheas que caen ANTES del primer compás, y el tiempo fuerte cae',
+  '  recién en "cum". Si lo escribís empezando en el tiempo 1, el acento queda en la sílaba',
+  '  equivocada y la canción no se reconoce aunque las notas sean las correctas.',
+  '- Cada compás tiene que sumar EXACTAMENTE los tiempos del compás. Las únicas excepciones',
+  '  son el primero (si hay anacrusa) y el último (si la canción termina antes de completarlo).',
+  '  Un compás de más o de menos corre todo lo que viene después y arruina la canción entera.',
+];
+
 /**
  * La densidad de acordes es lo ÚNICO que separa a un sub-nivel del otro, así que
  * las reglas se escriben enteras para cada uno en vez de matizar un texto común:
@@ -188,6 +208,15 @@ export function buildAiPrompt(o: PromptOptions): string {
     );
   }
 
+  // La anacrusa y la suma de compases valen para cualquier capa. El "ritmo real"
+  // habla de sílabas y notas, así que en acordes no viene al caso.
+  partes.push(
+    RITMO_TITULO,
+    ...(o.target === 'chords' ? [] : RITMO_REAL),
+    ...RITMO_COMPASES,
+    '',
+  );
+
   partes.push(FORMATO, '');
   partes.push(o.imponerMedida ? SOLO_LA_LINEA : 'Respondé con los dos renglones de medida y después la línea de música, nada más.', '');
 
@@ -211,10 +240,18 @@ export function buildAiPrompt(o: PromptOptions): string {
           ]),
     );
   } else {
+    // El ejemplo anterior era, literalmente, el arranque de "Feliz cumpleaños". Cuando
+    // justo se pedía esa canción, el modelo copiaba el ejemplo y se daba por terminado:
+    // el mismo anclaje que ya había roto el pedido del nivel entero. Ahora es una
+    // melodía inventada, y de paso muestra anacrusa y duraciones variadas.
     partes.push(
-      'MINIEJEMPLO DE LA FORMA — 3 compases inventados, NO es tu respuesta.',
-      ...(o.imponerMedida ? [] : ['BPM: 120', 'COMPAS: 3/4']),
-      '| G4/.5 G4/.5 | A4/1 G4/1 C5/1 | B4/2 r/1 |',
+      'MINIEJEMPLO DE LA FORMA — 3 compases inventados, NO es tu respuesta ni es una canción.',
+      'Fijate en dos cosas: el primer compás es corto (anacrusa de un tiempo) y las',
+      'duraciones son distintas entre sí, no todas iguales.',
+      ...(o.imponerMedida
+        ? ['(el ejemplo va en 3/4 solo para mostrar la forma; vos usá el compás pedido)']
+        : ['BPM: 120', 'COMPAS: 3/4']),
+      '| D4/1 | F4/1 A4/1.5 G4/.5 | E4/2 r/1 |',
     );
   }
 
@@ -225,6 +262,26 @@ export function buildAiPrompt(o: PromptOptions): string {
     'Escribí de principio a fin, sin abreviar: nada de "...", "etc." ni "(se repite)". Si una',
     'parte se repite, escribila de nuevo entera. Si te queda largo, podés usar varios renglones.',
     'No pidas confirmación ni ofrezcas continuar: entregá el resultado terminado.',
+  );
+
+  // La verificación final va última a propósito: es lo último que lee el modelo
+  // antes de responder, y es lo que lo hace releer en vez de entregar de una.
+  partes.push(
+    '',
+    'ANTES DE RESPONDER, VERIFICÁ (y corregí si hace falta)',
+    ...(o.imponerMedida ? [] : ['1. ¿Están los renglones BPM y COMPAS antes de la música?']),
+    '2. ¿Cada compás suma exactamente los tiempos del compás, salvo el primero y el último?',
+    '3. Si la canción tiene anacrusa, ¿el primer compás quedó corto?',
+    '4. ¿Está completa, sin abreviar ninguna repetición?',
+    ...(o.target === 'melody'
+      ? ['5. ¿Todas las notas están entre C4 y A5, que es lo que se puede tocar en el ukelele?']
+      : o.target === 'chords'
+        ? [
+            dif === 'facil'
+              ? '5. ¿Hay UN SOLO acorde en cada compás, ocupando el compás entero?'
+              : '5. ¿Ningún compás tiene más de DOS acordes, y los partidos son distintos entre sí?',
+          ]
+        : []),
   );
 
   return partes.join('\n');
@@ -283,17 +340,9 @@ function promptNivelCompleto(o: PromptOptions): string {
     'No fuerces la canción a un compás ni a un tempo que no le corresponden, y no la cortes ni la',
     'estires para llegar a una cantidad redonda de compases: escribila como es, completa.',
     '',
-    'RITMO — esto es lo que más se equivoca, leelo con atención',
-    '- Escribí el ritmo REAL de la canción, no todas las notas iguales. Si dos sílabas son',
-    '  corcheas, van /.5 cada una; si una nota se sostiene tres tiempos, va /3.',
-    '- ANACRUSA: muchas canciones no empiezan en el tiempo fuerte. Si la tuya arranca antes,',
-    '  escribí ese arranque como un PRIMER COMPÁS CORTO. El caso típico es "Feliz cumpleaños":',
-    '  el "Fe-liz" son dos corcheas que caen ANTES del primer compás, y el tiempo fuerte cae',
-    '  recién en "cum". Si lo escribís empezando en el tiempo 1, el acento queda en la sílaba',
-    '  equivocada y la canción no se reconoce aunque las notas sean las correctas.',
-    '- Cada compás tiene que sumar EXACTAMENTE los tiempos del compás. Las únicas excepciones',
-    '  son el primero (si hay anacrusa) y el último (si la canción termina antes de completarlo).',
-    '  Un compás de más o de menos corre todo lo que viene después y arruina la canción entera.',
+    RITMO_TITULO,
+    ...RITMO_REAL,
+    ...RITMO_COMPASES,
     '',
     'REGLAS',
     '- Las CUATRO capas tienen que durar LO MISMO y estar alineadas: el acorde del compás 3 tiene',

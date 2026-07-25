@@ -326,6 +326,40 @@ console.log('\n=== El sub-nivel cambia la densidad de acordes ===');
    palabra "ACORDES". Ese pedazo suelto generaba DOS errores, ninguno de los
    cuales nombraba la causa: lo leía como nota, y hacía que el último compás
    dejara de ser el último y perdiera el permiso de terminar corto. */
+/* El pedido de UNA capa se habia quedado atras del pedido de nivel entero: no
+   mencionaba la anacrusa, no pedia ritmo real, no avisaba que un compas mal
+   sumado corre todo, y el miniejemplo ERA el arranque de Feliz cumpleaños. */
+console.log('\n=== El pedido de notas sueltas (tablatura) ===');
+{
+  const mel = P.buildAiPrompt({ target: 'melody', title: 'T', bpm: 100, timeSig: '3/4',
+    beatsPerBar: 3, bars: 8, knownChords: ['C', 'Am', 'F', 'G'], pedido: 'Feliz cumpleaños',
+    imponerMedida: false });
+
+  check('explica la anacrusa', /ANACRUSA:/.test(mel));
+  check('pide el ritmo real, no notas iguales', /no todas las notas iguales/.test(mel));
+  check('avisa que un compás mal sumado corre todo', /corre todo lo que viene despu[eé]s/.test(mel));
+  check('exige el rango del ukelele', /entre C4 y A5/.test(mel));
+  check('pide una sola voz', /Una sola voz/.test(mel));
+  check('tiene verificación final', /ANTES DE RESPONDER, VERIFIC/.test(mel));
+  check('la verificación va última', mel.trim().endsWith('que es lo que se puede tocar en el ukelele?'));
+
+  // El anclaje: el ejemplo no puede ser la canción que se está pidiendo.
+  check('el miniejemplo ya NO es Feliz cumpleaños', !/G4\/\.5 G4\/\.5 \| A4\/1 G4\/1 C5\/1/.test(mel));
+  check('el miniejemplo muestra anacrusa', /\| D4\/1 \| F4\/1 A4\/1\.5 G4\/\.5 \| E4\/2 r\/1 \|/.test(mel));
+  check('aclara que el ejemplo no es una canción', /NO es tu respuesta ni es una canci[oó]n/.test(mel));
+
+  // El fondo comparte el camino, salvo el rango.
+  const fondo = P.buildAiPrompt({ target: 'backing', title: 'T', bpm: 100, timeSig: '4/4',
+    beatsPerBar: 4, bars: 8, knownChords: [], pedido: 'x', imponerMedida: false });
+  check('el fondo también explica la anacrusa', /ANACRUSA:/.test(fondo));
+  check('el fondo no se limita al rango del ukelele', /cualquier octava/.test(fondo));
+
+  // Y los acordes: la anacrusa sí, el "ritmo real" de sílabas no viene al caso.
+  const ac = P.buildAiPrompt({ ...base });
+  check('acordes también explican la anacrusa', /ANACRUSA:/.test(ac));
+  check('acordes no hablan de sílabas en corcheas', !/no todas las notas iguales/.test(ac));
+}
+
 console.log('\n=== Respuesta de la IA cortada por la mitad ===');
 {
   const truncado = [
