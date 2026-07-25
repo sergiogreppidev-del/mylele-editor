@@ -319,20 +319,14 @@ function parseLayer(text: string, opts: ParseOptions, beatsPerBarUsed: number): 
   let barSum = 0;
   let seenAnyToken = false;
 
+  // Los compases se juzgan al final, cuando ya se sabe cuál es el último: solo el
+  // primero (anacrusa) y el último (final incompleto) pueden quedar cortos.
+  const barSums: number[] = [];
   const closeBar = () => {
     if (!seenAnyToken) return; // un "|" al principio no abre compás
     if (barSum === 0) return; // "|" al final o dos seguidas: no es un compás vacío
     barIndex++;
-    if (Math.abs(barSum - beatsPerBarUsed) > 0.001) {
-      // El primer compás corto es una anacrusa legítima (arranque en alzada).
-      const esAnacrusa = barIndex === 1 && barSum < beatsPerBarUsed;
-      issues.push({
-        level: 'warn',
-        message: esAnacrusa
-          ? `El compás 1 suma ${tidy(barSum)} de ${beatsPerBarUsed} tiempos. Si es una anacrusa (arranque en alzada) está bien; si no, revisalo.`
-          : `El compás ${barIndex} suma ${tidy(barSum)} tiempos y debería sumar ${beatsPerBarUsed}.`,
-      });
-    }
+    barSums.push(barSum);
     barSum = 0;
   };
 
@@ -389,6 +383,36 @@ function parseLayer(text: string, opts: ParseOptions, beatsPerBarUsed: number): 
     seenAnyToken = true;
   }
   closeBar();
+
+  // --- 1b) Juzgar los compases ---
+  // Un compás que no suma corre TODO lo que viene después, y la canción se escucha
+  // desfasada aunque las notas sean las correctas. Por eso ahora bloquea en vez de
+  // solo avisar: la única excepción son los extremos, que sí pueden ser cortos.
+  barSums.forEach((sum, i) => {
+    if (Math.abs(sum - beatsPerBarUsed) <= 0.001) return;
+    const esPrimero = i === 0;
+    const esUltimo = i === barSums.length - 1;
+    const corto = sum < beatsPerBarUsed;
+
+    if (corto && esPrimero) {
+      issues.push({
+        level: 'warn',
+        message: `El compás 1 suma ${tidy(sum)} de ${beatsPerBarUsed} tiempos. Si es una anacrusa (arranque en alzada) está bien; si no, revisalo.`,
+      });
+    } else if (corto && esUltimo) {
+      issues.push({
+        level: 'warn',
+        message: `El último compás suma ${tidy(sum)} de ${beatsPerBarUsed} tiempos. Si la canción termina antes de completarlo está bien.`,
+      });
+    } else {
+      issues.push({
+        level: 'error',
+        message: `El compás ${i + 1} suma ${tidy(sum)} tiempos y tiene que sumar ${beatsPerBarUsed}. ${
+          corto ? 'Le falta' : 'Le sobra'
+        } ${tidy(Math.abs(sum - beatsPerBarUsed))}, y eso corre de lugar todo lo que viene después.`,
+      });
+    }
+  });
 
   // --- 2) Resolver alturas y decidir si hay que transponer ---
   let appliedShift = 0;

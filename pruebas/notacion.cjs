@@ -65,10 +65,45 @@ const r6 = N.parseNotation('| C/4 | Dm/4 |', { target: 'chords', beatsPerBar: 4,
 check('acorde inexistente → error', r6.issues.some((i) => i.level === 'error' && /Dm/.test(i.message)));
 
 console.log('\n=== Compases mal sumados ===');
+// Un compás corrido desfasa todo lo que sigue, así que bloquea en vez de solo avisar.
 const malo = '| C/4 | Am/3 | F/4 |';
 const r7 = N.parseNotation(malo, { target: 'chords', beatsPerBar: 4, knownChords: ['C', 'Am', 'F'] });
 const aviso = r7.issues.find((i) => /compás 2/.test(i.message));
 check('detecta el compás 2', !!aviso, aviso && aviso.message);
+check('un compás del medio mal sumado es ERROR', aviso && aviso.level === 'error', aviso && aviso.level);
+
+// Los extremos sí pueden quedar cortos: anacrusa al principio, final incompleto.
+const extremos = '| C/1 | C/4 | Am/4 | F/2 |';
+const rx = N.parseNotation(extremos, { target: 'chords', beatsPerBar: 4, knownChords: ['C', 'Am', 'F'] });
+check('anacrusa y final corto no bloquean',
+  rx.issues.filter((i) => i.level === 'error').length === 0,
+  JSON.stringify(rx.issues.map((i) => i.level + ': ' + i.message)));
+check('igual se avisan los dos', rx.issues.filter((i) => i.level === 'warn').length === 2);
+
+// Un compás MÁS LARGO que el compás nunca es válido, ni en los extremos.
+const largo = '| C/5 | Am/4 |';
+const rl = N.parseNotation(largo, { target: 'chords', beatsPerBar: 4, knownChords: ['C', 'Am'] });
+check('un compás de más siempre es error', rl.issues.some((i) => i.level === 'error' && /sobra/.test(i.message)),
+  JSON.stringify(rl.issues.map((i) => i.level + ': ' + i.message)));
+
+// El caso real que falló: Feliz cumpleaños sin anacrusa y con compases de 4 y 5 en 3/4.
+const hbMal = 'COMPAS: 3/4\nMELODIA: | G4/1 G4/1 A4/1 | G4/1 D5/1 C5/2 | G4/1 G4/1 A4/1 |';
+const rhb = N.parseNotation(hbMal, { target: 'melody', beatsPerBar: 3, knownChords: [] });
+check('el compás de 4 en 3/4 ahora bloquea',
+  rhb.issues.some((i) => i.level === 'error' && /compás 2/.test(i.message)),
+  JSON.stringify(rhb.issues.map((i) => i.level + ': ' + i.message)));
+
+console.log('\n=== El pedido pide anacrusa y ritmo real ===');
+{
+  const P2 = require('./build/aiPrompt.js');
+  const pn = P2.buildAiPrompt({ target: 'nivel', title: 'T', bpm: 80, timeSig: '4/4', beatsPerBar: 4,
+                                bars: 8, knownChords: ['C', 'F', 'G'], pedido: 'Feliz cumpleaños', imponerMedida: false });
+  check('explica la anacrusa', /ANACRUSA/.test(pn));
+  check('usa Feliz cumpleaños como ejemplo', /Feliz cumplea/.test(pn) && /G4\/\.5 G4\/\.5/.test(pn));
+  check('avisa que un compás corrido arruina todo', /corre todo lo que viene después/.test(pn));
+  check('pide el ritmo real, no notas iguales', /no todas las notas iguales/.test(pn));
+  check('pide las tres capas', /FONDO:/.test(pn) && /MELODIA:/.test(pn) && /ACORDES:/.test(pn));
+}
 
 console.log('\n=== Basura ===');
 const r8 = N.parseNotation('C/4 Hola/2 G4/xyz', { target: 'chords', beatsPerBar: 4, knownChords: ['C'] });

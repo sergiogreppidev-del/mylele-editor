@@ -238,9 +238,16 @@ export class PreviewAudio {
       else src.start(ctx.currentTime, ctx.currentTime - when); // ya pasó: entra por el medio
       this.source = src;
     } else if (backing) {
-      this.scheduleBacking(events, startTime, countInBeats, beatDur, chordPcs);
-      this.scheduleStrums(events, startTime, countInBeats, beatDur, chordPcs);
-      this.scheduleBackingMelody(backingNotes, startTime, countInBeats, beatDur);
+      // Una sola fuente de acompañamiento: si hay fondo escrito, ESE es el
+      // acompañamiento. Sumarle además el groove sintetizado encimaba dos
+      // acompañamientos con ritmos distintos y volvía la canción irreconocible.
+      if (backingNotes.length > 0) {
+        this.scheduleBackingMelody(backingNotes, startTime, countInBeats, beatDur);
+        this.scheduleStrums(events, startTime, countInBeats, beatDur, chordPcs);
+      } else {
+        this.scheduleBacking(events, startTime, countInBeats, beatDur, chordPcs);
+        this.scheduleStrums(events, startTime, countInBeats, beatDur, chordPcs);
+      }
     }
     // Las notas del alumno suenan siempre: son lo que se está editando.
     this.scheduleMelody(melodyNotes, startTime, countInBeats, beatDur);
