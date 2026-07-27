@@ -1,6 +1,14 @@
 import { useState } from 'react';
 import { CandyButton } from '../components/CandyButton';
-import { deleteSong, duplicateSong, hasSongDraft, playableChart, songDifficulty, songMode } from '../lib/db';
+import {
+  deleteSong,
+  duplicateSong,
+  hasSongDraft,
+  moverCancion,
+  playableChart,
+  songDifficulty,
+  songMode,
+} from '../lib/db';
 import type { ChartRow, SongRow } from '../lib/db';
 import { DIFICULTADES, ETAPA_ACTUAL } from '../lib/chartFormat';
 import type { ChartMode } from '../lib/chartFormat';
@@ -34,21 +42,24 @@ function stateOf(song: SongRow): State {
   return 'live';
 }
 
-/** Los dos currículos. Cada uno es un camino aparte, con su propia puerta de entrada. */
-const GRUPOS: { mode: ChartMode; titulo: string; crear: string; vacio: string }[] = [
-  {
-    mode: 'chords',
-    titulo: '🎸 Acordes',
-    crear: '+ Nivel de acordes',
-    vacio: 'Todavía no hay niveles de acordes.',
-  },
-  {
-    mode: 'melody',
-    titulo: '🎵 Notas',
-    crear: '+ Nivel de notas',
-    vacio: 'Todavía no hay niveles de notas. El alumno toca la melodía en la tablatura.',
-  },
+/**
+ * Las puertas de entrada para crear. El tipo se decide en el primer clic, no después:
+ * antes había un solo botón y todo nacía como nivel de acordes.
+ *
+ * Ya NO son dos listas separadas. La app de alumnos tiene **un solo recorrido**
+ * ordenado por `orden`, donde acordes y notas se intercalan, y esta lista tiene que
+ * mostrar exactamente ese recorrido — si acá se ven dos columnas paralelas, no hay
+ * forma de saber en qué orden se los va a encontrar el alumno.
+ */
+const CREAR: { mode: ChartMode; label: string }[] = [
+  { mode: 'chords', label: '+ Nivel de acordes' },
+  { mode: 'melody', label: '+ Nivel de notas' },
 ];
+
+const MODO_LABEL: Record<ChartMode, string> = {
+  chords: '🎸 Acordes',
+  melody: '🎵 Notas',
+};
 
 /**
  * La dificultad de un vistazo. Existe porque los tres niveles de acordes que
@@ -89,6 +100,23 @@ export function LevelList({ songs, digitaciones, canEdit, onOpen, onReload }: Pr
     }
   }
 
+  /**
+   * Sube o baja una canción en la ruta. El intercambio de lugares lo hace una función
+   * del servidor: son dos escrituras que tienen que pasar juntas o ninguna.
+   */
+  async function handleMover(song: SongRow, direccion: -1 | 1) {
+    setBusy(song.id);
+    setError(null);
+    try {
+      await moverCancion(song.id, direccion);
+      await onReload();
+    } catch (e) {
+      setError(friendlyError(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function handleDelete(song: SongRow) {
     const ok = window.confirm(
       `¿Borrar "${song.title}" y su chart?\n\nSi está en vivo, desaparece de la app de alumnos. No se puede deshacer.`,
@@ -117,79 +145,91 @@ export function LevelList({ songs, digitaciones, canEdit, onOpen, onReload }: Pr
 
       {error && <div className="notice bad">{error}</div>}
 
-      {/* Los dos currículos son caminos paralelos, así que se leen mejor uno al
-          lado del otro. En pantalla angosta se apilan solos. */}
-      <div className="grupos">
-        {GRUPOS.map(({ mode: gm, titulo, crear, vacio }) => {
-          const delGrupo = songs.filter((s) => songMode(s) === gm);
+      <div className="row" style={{ gap: 8 }}>
+        <span className="muted">Se juegan en este orden ↓</span>
+        <div className="grow" />
+        {CREAR.map(({ mode, label }) => (
+          <CandyButton
+            key={mode}
+            small
+            tone="lime"
+            disabled={!canEdit}
+            onClick={() => onOpen(null, mode)}
+          >
+            {label}
+          </CandyButton>
+        ))}
+      </div>
+
+      {songs.length === 0 ? (
+        <div className="notice">Todavía no hay niveles. Empezá creando uno.</div>
+      ) : (
+        songs.map((s, i) => {
+          const chart = playableChart(s);
+          const label = STATE_LABEL[stateOf(s)];
+          const modo = songMode(s);
           return (
-            <div key={gm} className="grupo">
+            <div key={s.id} className="nivel">
               <div className="row">
-                <h3 className="group-title">{titulo}</h3>
-                <span className="muted">
-                  {delGrupo.length === 0
-                    ? 'ninguno'
-                    : `${delGrupo.length} ${delGrupo.length === 1 ? 'nivel' : 'niveles'}`}
+                {/* La posición en el recorrido. Es lo que el alumno recorre de arriba
+                    hacia abajo, y por eso encabeza la fila. */}
+                <span className="badge sub tnum">{i + 1}</span>
+                <div className="lv-title grow">{s.title || 'Sin título'}</div>
+                <span className={label.cls}>{label.text}</span>
+              </div>
+              <div className="row" style={{ gap: 7 }}>
+                <span className="badge sub">{MODO_LABEL[modo]}</span>
+                <span className="badge sub">
+                  {DIFICULTADES.find((d) => d.id === songDifficulty(s))?.label}
                 </span>
-                <div className="grow" />
-                {/* El tipo se decide acá, en el primer clic. Antes había un solo
-                    botón arriba de todo y siempre nacía un nivel de acordes. */}
-                <CandyButton small tone="lime" disabled={!canEdit} onClick={() => onOpen(null, gm)}>
-                  {crear}
+                <span className="muted tnum">{s.bpm} BPM</span>
+                <span className="muted">{s.time_sig}</span>
+                <span className="muted">{s.is_free ? 'Gratis' : 'Premium'}</span>
+              </div>
+              <div className="muted">{resumenDificultad(s, chart, digitaciones)}</div>
+              <div className="row" style={{ gap: 6 }}>
+                {/* Las flechas cambian el orden en la app AL INSTANTE: no pasan por el
+                    borrador ni esperan a publicar. Por eso están acá y no en la ficha. */}
+                <CandyButton
+                  small
+                  tone="ghost"
+                  disabled={!canEdit || busy === s.id || i === 0}
+                  onClick={() => void handleMover(s, -1)}
+                >
+                  ↑
+                </CandyButton>
+                <CandyButton
+                  small
+                  tone="ghost"
+                  disabled={!canEdit || busy === s.id || i === songs.length - 1}
+                  onClick={() => void handleMover(s, 1)}
+                >
+                  ↓
+                </CandyButton>
+                <CandyButton small tone="sky" onClick={() => onOpen(s.id)}>
+                  Editar
+                </CandyButton>
+                <CandyButton
+                  small
+                  tone="ghost"
+                  disabled={!canEdit || busy === s.id}
+                  onClick={() => void handleDuplicate(s)}
+                >
+                  Duplicar
+                </CandyButton>
+                <CandyButton
+                  small
+                  tone="melon"
+                  disabled={!canEdit || busy === s.id}
+                  onClick={() => void handleDelete(s)}
+                >
+                  Borrar
                 </CandyButton>
               </div>
-
-              {delGrupo.length === 0 ? (
-                <div className="notice">{vacio}</div>
-              ) : (
-                delGrupo.map((s) => {
-                  const chart = playableChart(s);
-                  const label = STATE_LABEL[stateOf(s)];
-                  return (
-                    <div key={s.id} className="nivel">
-                      <div className="row">
-                        <div className="lv-title grow">{s.title || 'Sin título'}</div>
-                        <span className={label.cls}>{label.text}</span>
-                      </div>
-                      <div className="row" style={{ gap: 7 }}>
-                        <span className="badge sub">
-                          {DIFICULTADES.find((d) => d.id === songDifficulty(s))?.label}
-                        </span>
-                        <span className="muted tnum">nivel {s.level}</span>
-                        <span className="muted tnum">{s.bpm} BPM</span>
-                        <span className="muted">{s.time_sig}</span>
-                        <span className="muted">{s.is_free ? 'Gratis' : 'Premium'}</span>
-                      </div>
-                      <div className="muted">{resumenDificultad(s, chart, digitaciones)}</div>
-                      <div className="row" style={{ gap: 6 }}>
-                        <CandyButton small tone="sky" onClick={() => onOpen(s.id)}>
-                          Editar
-                        </CandyButton>
-                        <CandyButton
-                          small
-                          tone="ghost"
-                          disabled={!canEdit || busy === s.id}
-                          onClick={() => void handleDuplicate(s)}
-                        >
-                          Duplicar
-                        </CandyButton>
-                        <CandyButton
-                          small
-                          tone="melon"
-                          disabled={!canEdit || busy === s.id}
-                          onClick={() => void handleDelete(s)}
-                        >
-                          Borrar
-                        </CandyButton>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
             </div>
           );
-        })}
-      </div>
+        })
+      )}
 
       <p className="muted">
         Los niveles en <b>borrador</b> no aparecen en la app de alumnos hasta que los publiques.

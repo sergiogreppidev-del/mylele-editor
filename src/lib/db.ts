@@ -36,6 +36,19 @@ export interface SongRow extends Song {
   charts: ChartRow[];
   /** Cambios de la ficha sin publicar. Las columnas de al lado son lo que ve el alumno. */
   draft: Partial<Song> | null;
+  /**
+   * El lugar en la ruta. Es el orden en que el alumno ve los niveles, y el mismo en que
+   * se listan acá.
+   *
+   * Va en la FILA y no en la ficha (`Song`) a propósito: no es un dato que se edite en
+   * el formulario ni que pase por el borrador. Se cambia con las flechas de la lista, y
+   * el cambio es inmediato — publicar o descartar la ficha no lo toca.
+   *
+   * ⚠️ **No usar `level` para ordenar.** No es único (llegó a haber dos niveles con
+   * `level = 2`) y dentro de un mismo `level` el orden que devuelve PostgREST es
+   * arbitrario: dos canciones podían intercambiarse de lugar entre una carga y otra.
+   */
+  orden: number;
 }
 
 /** La ficha tal como se ve en el editor: lo publicado con el borrador encima. */
@@ -136,14 +149,29 @@ export function chordUsage(songs: SongRow[], chordId: string): string[] {
 
 /* ---------------- Canciones ---------------- */
 
+/** Las canciones en el orden de la ruta: el MISMO que ve el alumno en la app. */
 export async function listSongs(): Promise<SongRow[]> {
   const { data, error } = await supabase
     .from('songs')
     .select('*, charts(id, song_id, mode, difficulty, version, events, published)')
-    .order('level', { ascending: true })
-    .order('title', { ascending: true });
+    .order('orden', { ascending: true });
   if (error) throw error;
   return (data ?? []).map(normalizeSongRow);
+}
+
+/**
+ * Mueve una canción un lugar en la ruta. `-1` la sube, `1` la baja.
+ *
+ * Lo resuelve una función del servidor porque son dos escrituras que tienen que pasar
+ * juntas o ninguna; hechas desde acá, si la segunda falla quedan dos canciones con el
+ * mismo lugar. Si ya está en la punta no hace nada y no es un error.
+ */
+export async function moverCancion(id: string, direccion: -1 | 1): Promise<void> {
+  const { error } = await supabase.rpc('mover_cancion', {
+    p_song_id: id,
+    p_direccion: direccion,
+  });
+  if (error) throw error;
 }
 
 export async function getSong(id: string): Promise<SongRow> {
