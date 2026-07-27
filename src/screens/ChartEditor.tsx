@@ -14,7 +14,9 @@ import { LevelOverview, largoDeCapas } from '../components/LevelOverview';
 import { ImportDialog } from '../components/ImportDialog';
 import { DificultadPanel } from '../components/DificultadPanel';
 import { acordesPara, medirAcordes, medirMelodia, verificarPerfil } from '../lib/dificultad';
-import { avisosDeArmonia, detectarMetronomo, melodiaDelNivel, verificarArmonia } from '../lib/calidad';
+import {
+  avisosDeArmonia, detectarMetronomo, detectarRasgueoMecanico, melodiaDelNivel, verificarArmonia,
+} from '../lib/calidad';
 import { bloqueDeRepeticion, duplicarCompas, inicioDelCompas, repetir } from '../lib/estructura';
 import type { Digitaciones } from '../lib/dificultad';
 import { STRING_MIDI, midiToPitch, validateBacking } from '../lib/notation';
@@ -224,6 +226,12 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     () => detectarMetronomo(backingNotes, song.time_sig, song.pickup_beats),
     [backingNotes, song.time_sig, song.pickup_beats],
   );
+  // El mismo control, pero sobre la capa que toca el alumno: un golpe por tiempo de
+  // punta a punta obliga a cortar el acorde donde la canción sostiene.
+  const rasgueoIssues = useMemo(
+    () => (mode === 'chords' ? detectarRasgueoMecanico(events, melodiaDelNivel(melody, backingNotes)) : []),
+    [mode, events, melody, backingNotes],
+  );
 
   const chordPcs: ChordPcs = useMemo(() => {
     const map: ChordPcs = {};
@@ -238,7 +246,7 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
   );
   const backingIssues = useMemo(() => validateBacking(backingNotes), [backingNotes]);
   const allIssues = [...songIssues, ...chartIssues, ...backingIssues, ...perfilIssues,
-                     ...armoniaIssues, ...metronomoIssues];
+                     ...armoniaIssues, ...metronomoIssues, ...rasgueoIssues];
   const blocked = hasErrors(allIssues);
 
   const liveChart: ChartRow | null = loaded ? publishedChart(loaded, mode, dificultad) : null;

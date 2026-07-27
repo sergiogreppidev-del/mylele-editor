@@ -14,7 +14,23 @@
    `|` separa compases y sirve de red de seguridad: si un compás no suma
    los tiempos que debería, se avisa con el número exacto de compás.
    `r` es silencio (avanza el tiempo, no genera evento).
+   `~` es LIGADURA: alarga lo anterior en vez de volver a tocarlo.
    La duración es opcional y por defecto vale 1 tiempo.
+
+   POR QUÉ HACE FALTA LA LIGADURA
+   ------------------------------
+   Una nota o un acorde pueden durar más de lo que queda del compás, y sin
+   forma de escribirlo había que elegir entre dos mentiras: cortarlo en la
+   barra (y el alumno vuelve a rasguear justo donde la canción sostiene) o
+   poner un silencio (y se apaga antes de tiempo). Con la ligadura,
+
+     F/3 | ~/3
+
+   es UN evento de seis tiempos, y así se dibuja en la pista del juego.
+
+   Se eligió `~` y no `-` porque el guion ya es uno de los nombres del
+   silencio (`REST_NAMES`), y el mismo signo no puede significar dos cosas
+   opuestas.
    =================================================================== */
 
 import type { BackingEvent, ChordEvent, Issue, MelodyEvent, UkeString, Voice } from './chartFormat';
@@ -196,6 +212,9 @@ interface Token {
 const REST_NAMES = new Set(['r', 'R', '-', '_']);
 const esSilencio = (tk: { names: string[]; poly: boolean }) =>
   !tk.poly && tk.names.length === 1 && REST_NAMES.has(tk.names[0]);
+
+const esLigadura = (tk: { names: string[]; poly: boolean }) =>
+  !tk.poly && tk.names.length === 1 && tk.names[0] === '~';
 
 function stripComments(text: string): string {
   return text
@@ -481,7 +500,7 @@ function parseLayer(
   if (opts.target !== 'chords') {
     const midis: number[] = [];
     for (const tk of tokens) {
-      if (esSilencio(tk)) continue;
+      if (esSilencio(tk) || esLigadura(tk)) continue;
       for (const name of tk.names) {
         const midi = pitchToMidi(name);
         if (midi === null) {
@@ -517,29 +536,55 @@ function parseLayer(
 
   // --- 3) Construir los eventos con el tiempo acumulado ---
   let t = 0;
-  for (const tk of tokens) {
-    const isRest = esSilencio(tk);
+  // Los eventos que escribió el token anterior. Una ligadura los alarga en vez de
+  // crear otros; un silencio los suelta, porque después de un silencio no hay nada
+  // que sostener y atar por encima de él uniría dos notas separadas.
+  let ultimos: { dur: number }[] = [];
 
-    if (opts.target === 'chords') {
-      if (!isRest) {
-        const nombre = tk.names[0];
-        if (!chordSet.has(nombre)) {
-          issues.push({
-            level: 'error',
-            message: `El acorde "${nombre}" no existe en tu tabla de acordes. Disponibles: ${opts.knownChords.join(', ') || '(ninguno)'}.`,
-          });
-        } else {
-          chordEvents.push({ t: tidy(t), chord: nombre, dur: tidy(tk.dur), dir: tk.dir ?? 'd' });
-        }
+  for (const tk of tokens) {
+    if (esLigadura(tk)) {
+      if (ultimos.length === 0) {
+        issues.push({
+          level: 'error',
+          message: `"${tk.raw}" es una ligadura, y una ligadura alarga lo anterior. Acá no hay nada antes que alargar: ¿querías un silencio ("r/${fmtDur(tk.dur)}")?`,
+        });
+      } else {
+        for (const e of ultimos) e.dur = tidy(e.dur + tk.dur);
       }
-    } else if (!isRest) {
-      // Un token puede traer varias notas: todas arrancan en el mismo tiempo.
+      t += tk.dur;
+      continue;
+    }
+
+    if (esSilencio(tk)) {
+      ultimos = [];
+      t += tk.dur;
+      continue;
+    }
+
+    const nuevos: { dur: number }[] = [];
+    if (opts.target === 'chords') {
+      const nombre = tk.names[0];
+      if (!chordSet.has(nombre)) {
+        issues.push({
+          level: 'error',
+          message: `El acorde "${nombre}" no existe en tu tabla de acordes. Disponibles: ${opts.knownChords.join(', ') || '(ninguno)'}.`,
+        });
+      } else {
+        const ev: ChordEvent = { t: tidy(t), chord: nombre, dur: tidy(tk.dur), dir: tk.dir ?? 'd' };
+        chordEvents.push(ev);
+        nuevos.push(ev);
+      }
+    } else {
+      // Un token puede traer varias notas: todas arrancan en el mismo tiempo, y una
+      // ligadura después las alarga a todas juntas.
       for (const name of tk.names) {
         const base = pitchToMidi(name);
         if (base === null) continue; // ya se avisó al resolver las alturas
         const midi = base + appliedShift;
         if (opts.target === 'backing') {
-          backingEvents.push({ t: tidy(t), pitch: midiToPitch(midi), dur: tidy(tk.dur), v: voice });
+          const ev: BackingEvent = { t: tidy(t), pitch: midiToPitch(midi), dur: tidy(tk.dur), v: voice };
+          backingEvents.push(ev);
+          nuevos.push(ev);
         } else {
           const tab = midiToTab(midi);
           if (!tab) {
@@ -548,12 +593,15 @@ function parseLayer(
               message: `La nota ${midiToPitch(midi)} no se puede tocar en un ukelele (el rango es C4 a A5).`,
             });
           } else {
-            melodyEvents.push({ t: tidy(t), string: tab.string, fret: tab.fret, dur: tidy(tk.dur) });
+            const ev: MelodyEvent = { t: tidy(t), string: tab.string, fret: tab.fret, dur: tidy(tk.dur) };
+            melodyEvents.push(ev);
+            nuevos.push(ev);
           }
         }
       }
     }
 
+    ultimos = nuevos;
     t += tk.dur;
   }
 
@@ -602,6 +650,13 @@ function fmtDur(d: number): string {
   return s.startsWith('0.') ? s.slice(1) : s; // 0.5 → .5
 }
 
+/** El nombre de un evento, sin la duración: "C", "G4", o la nota de una tablatura. */
+function nombreDe(e: ChordEvent | MelodyEvent | BackingEvent): string {
+  if ('chord' in e) return e.chord;
+  if ('pitch' in e) return e.pitch;
+  return midiToPitch(STRING_MIDI[e.string] + e.fret);
+}
+
 /** Convierte eventos de vuelta a texto, para poder pegárselos a una IA y pedirle cambios. */
 export function toNotation(
   events: (ChordEvent | MelodyEvent | BackingEvent)[],
@@ -630,13 +685,25 @@ export function toNotation(
     }
     if (Math.abs(cursor - nextBar) < 0.001) bar();
 
-    if ('chord' in e) out.push(`${e.chord}/${fmtDur(e.dur)}${e.dir === 'u' ? ':u' : ''}`);
-    else if ('pitch' in e) out.push(`${e.pitch}/${fmtDur(e.dur)}`);
-    else out.push(`${midiToPitch(STRING_MIDI[e.string] + e.fret)}/${fmtDur(e.dur)}`);
+    /* Un evento más largo que lo que queda del compás se parte con ligaduras: el
+       primer pedazo lleva el nombre y los siguientes son "~".
 
-    cursor = e.t + e.dur;
-    // Una nota que cruza el compás no se parte: se corre la próxima barra.
-    while (cursor > nextBar + 0.001) nextBar += beatsPerBar;
+       Antes se escribía entero y se corría la barra de compás para que entrara. El
+       texto se veía bien pero YA NO SE PODÍA VOLVER A LEER: al reparsearlo, ese
+       compás sumaba de más y el parser lo rechazaba. O sea que la ida y la vuelta
+       no cerraban justo en las canciones con acordes sostenidos, que son las que
+       más importa poder mandarle a la IA para pedirle cambios. */
+    const sufijo = 'chord' in e && e.dir === 'u' ? ':u' : '';
+    let restante = e.dur;
+    let primero = true;
+    while (restante > 0.001) {
+      const trozo = tidy(Math.min(restante, nextBar - cursor));
+      out.push(primero ? `${nombreDe(e)}/${fmtDur(trozo)}${sufijo}` : `~/${fmtDur(trozo)}`);
+      primero = false;
+      cursor = tidy(cursor + trozo);
+      restante = tidy(restante - trozo);
+      if (restante > 0.001) bar();
+    }
   }
   return out.join(' ');
 }

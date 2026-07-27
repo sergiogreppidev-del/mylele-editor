@@ -60,6 +60,21 @@ Están todas cubiertas por pruebas. Si tocás algo de esto, corré `npm run prob
   a los tres compases. Pasó dos veces, en dos pedidos distintos.
 - **La anacrusa.** Los compases empiezan en `pickup_beats + k*bpb`, no cada N desde cero.
   Sin esto el acento cae en la sílaba equivocada y la canción no se reconoce.
+- **Un elemento de la capa de acordes es UN RASGUEO, no "un acorde".** Su `dur` es cuánto
+  lo dejás sonar. `C/2` es un golpe que suena dos tiempos, **no** dos golpes de uno.
+  El pedido a la IA decía "en 4/4 son todos X/4" y de ahí salía un golpe por compás de
+  punta a punta: el final de Estrellita pide un Do sostenido y el juego mostraba dos Do
+  seguidos, así que había que cortar el acorde justo donde la canción respira.
+  La regla es **el rasgueo sigue el ritmo de la melodía**, y el eje de dificultad es cada
+  cuánto CAMBIA el acorde — no cuántas veces se rasguea. Por eso `C/2 C/2` pasó de ser un
+  error a ser correcto: son dos golpes del mismo acorde. Lo cubre `detectarRasgueoMecanico`
+  en `calidad.ts`, que avisa cuando **todos** los golpes duran lo mismo.
+- **La ligadura `~/1`.** Alarga lo anterior en vez de volver a tocarlo, y es la única forma
+  de que algo cruce la barra de compás: `F/3 | ~/3` es un evento de seis tiempos.
+  Se eligió `~` y no `-` porque el guion ya es uno de los nombres del silencio.
+  Sin ella, `toNotation` escribía el evento largo entero y corría la barra — un texto que
+  **ya no se podía volver a leer**, o sea que la ida y la vuelta no cerraban justo en las
+  canciones con acordes sostenidos.
 - **Operaciones de estructura.** Repetir o duplicar tiene que mover **todas** las capas,
   y el bloque se mide sobre la más larga.
 

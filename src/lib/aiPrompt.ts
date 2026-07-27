@@ -59,8 +59,39 @@ Una sola línea con elementos separados por espacios.
 - Cada elemento es NOMBRE/DURACION. La duración se mide en TIEMPOS (beats), no en segundos.
 - Podés usar decimales: 1 = negra, .5 = corchea, 2 = blanca, 1.5 = negra con puntillo.
 - "r/1" es un silencio de un tiempo.
+- "~/1" es una LIGADURA: alarga lo anterior en vez de volver a tocarlo. Sirve cuando algo
+  dura más de lo que queda del compás: "F/3 | ~/3" es UN solo golpe de seis tiempos.
 - "|" separa compases. Poné una barra al final de cada compás.
 - NO escribas tiempos de inicio ni números de compás: se calculan solos sumando las duraciones.`;
+
+/**
+ * EL RASGUEO SIGUE EL RITMO DE LA MELODÍA.
+ *
+ * Esto es lo último que se aprendió, y se aprendió jugando. Antes el pedido decía que
+ * en Fácil cada compás llevaba un acorde de compás entero ("todos X/4"), y eso mezclaba
+ * dos cosas distintas: cada cuánto CAMBIA la armonía (que sí es lo que hace difícil un
+ * nivel) y cuántas veces se RASGUEA (que no le agrega ningún trabajo a la mano que forma
+ * el acorde).
+ *
+ * El resultado se escuchaba: el final de Estrellita pide un Do sostenido y el juego
+ * mostraba dos Do seguidos, así que había que cortar el acorde para volver a golpear
+ * justo donde la canción respira. La corrección no es "más golpes" ni "menos golpes":
+ * es que los golpes caigan donde la canción se mueve.
+ */
+const RASGUEO = [
+  'EL RITMO DEL RASGUEO — sigue a la melodía, no al metrónomo',
+  '- Un elemento de esta línea es UN rasgueo, y su duración es cuánto lo dejás sonar.',
+  '  "C/2" es UN rasgueo que suena dos tiempos. NO son dos rasgueos de un tiempo.',
+  '- Mirá la melodía compás por compás: donde la melodía se MUEVE, se rasguea; donde la',
+  '  melodía SOSTIENE una nota larga, el acorde se sostiene con ella en un solo golpe.',
+  '  Si la melodía hace cuatro negras, van cuatro rasgueos; si termina la frase con una',
+  '  blanca, va UN rasgueo de dos tiempos, no dos de uno.',
+  '- Si el acorde tiene que sonar más de lo que queda del compás, usá la ligadura:',
+  '  "F/3 | ~/3" es un solo rasgueo de seis tiempos que cruza la barra.',
+  '- Los SILENCIOS valen. Si la canción respira, poné "r/2" y que no se rasguee ahí.',
+  '- Todos los rasgueos con la misma duración de punta a punta es el error a evitar:',
+  '  eso es un metrónomo, y se nota apenas se juega.',
+];
 
 const SOLO_LA_LINEA = `Respondé ÚNICAMENTE con eso, sin explicaciones, sin comillas y sin bloque de código.`;
 
@@ -99,18 +130,24 @@ const RITMO_COMPASES = [
  */
 function reglasSubNivel(dificultad: Difficulty, permitidos: string[]): string[] {
   const lista = permitidos.join(', ') || '(no hay acordes cargados)';
+  const comun = [
+    'CUÁNTAS VECES PUEDE CAMBIAR EL ACORDE — regla dura, no la negocies',
+    'Ojo: esto limita cada cuánto CAMBIA la armonía. NO limita cuántas veces se rasguea:',
+    'eso lo decide la melodía, y está explicado en su propia sección.',
+  ];
   if (dificultad === 'facil') {
     return [
-      'QUÉ TAN DIFÍCIL PUEDE SER PARA LA MANO IZQUIERDA — regla dura, no la negocies',
+      ...comun,
       `- Usá SOLO estos acordes: ${lista}. Son los que menos dedos piden. Ninguno más,`,
       '  aunque la canción original los tenga: reemplazalos por el más parecido de esa lista.',
-      '- Apuntá a que cada acorde dure DOS COMPASES O MÁS. Cambiar antes se permite solo si',
-      '  sostenerlo sonaría claramente mal.',
-      '- UN SOLO acorde por compás, ocupando el compás entero: en 4/4 son todos "X/4"; en 3/4,',
-      '  todos "X/3". Está prohibido partir un compás en dos acordes.',
+      '- UN SOLO acorde por compás. El compás entero se toca con el mismo acorde, aunque',
+      '  lo rasguees varias veces: "C/1 C/1 C/2" es un compás de Do, y está perfecto.',
+      '- Está prohibido que en un mismo compás haya DOS acordes distintos.',
       '- Si la armonía real cambia en la mitad del compás, quedate con el del tiempo fuerte.',
       '  Se pierde un matiz y está bien: el alumno recién aprende a cambiar de posición.',
-      '- Que un mismo acorde se repita varios compases seguidos NO es un problema: es el objetivo.',
+      '- Apuntá a que un mismo acorde aguante DOS COMPASES O MÁS antes de cambiar. Que se',
+      '  repita varios compases seguidos NO es un problema: es el objetivo.',
+      '- Todos los rasgueos hacia abajo. No uses ":u" en esta etapa.',
       '- Si la canción que te pidieron necesita sí o sí más acordes o cambios más rápidos,',
       '  DECILO en un renglón que empiece con "NOTA:" antes del BPM, y entregá igual la versión',
       '  simplificada. No te salgas de la regla por tu cuenta.',
@@ -118,13 +155,11 @@ function reglasSubNivel(dificultad: Difficulty, permitidos: string[]): string[] 
     ];
   }
   return [
-    'QUÉ TAN DIFÍCIL PUEDE SER PARA LA MANO IZQUIERDA — regla dura, no la negocies',
+    ...comun,
     `- Usá únicamente estos acordes: ${lista}. Si la canción pide otro, poné el más parecido.`,
-    '- Un acorde por compás es lo normal. Podés partir un compás en DOS acordes de media',
-    '  duración —en 4/4 es "F/2 C/2"— pero solo donde la armonía realmente cambia ahí.',
-    '- Nunca tres o más acordes en un mismo compás.',
-    '- Los dos acordes de un compás partido tienen que ser DISTINTOS. "C/2 C/2" es un error:',
-    '  eso es un solo acorde de compás entero y hay que escribirlo así.',
+    '- Un acorde por compás es lo normal. Podés cambiar de acorde en la mitad del compás,',
+    '  una sola vez, y solo donde la armonía realmente cambia ahí.',
+    '- Nunca tres o más acordes DISTINTOS en un mismo compás.',
     '- No metas un cambio de más solo para que sea difícil: si el compás tiene un solo acorde,',
     '  va uno solo. Un acorde que dura varios compases seguidos sigue estando bien.',
     '',
@@ -199,6 +234,8 @@ export function buildAiPrompt(o: PromptOptions): string {
       '- Podés agregar :d (rasgueo hacia abajo) o :u (hacia arriba) después de la duración.',
       '  Si no ponés nada, es hacia abajo.',
       '',
+      ...RASGUEO,
+      '',
       ...reglasSubNivel(dif, permitidos),
     );
 
@@ -249,6 +286,10 @@ export function buildAiPrompt(o: PromptOptions): string {
 
   /* ---- Ejemplo ---- */
   const bpb = o.imponerMedida ? o.beatsPerBar : 4;
+  // El ejemplo tiene que sumar el compás que se está pidiendo. Escrito con duraciones
+  // fijas ("C/1 C/1 C/2") le enseñaba a la IA un compás de 4 tiempos aunque el nivel
+  // fuera de 3, que es exactamente el error que el resto del pedido le prohíbe.
+  const cierre = bpb >= 4 ? `C/1 C/1 C/${bpb - 2}` : `C/1 C/${bpb - 1}`;
   if (o.target === 'chords') {
     // El ejemplo tiene que mostrar la densidad que se está pidiendo: si muestra un
     // compás partido cuando se pidió uno por compás, la IA copia el ejemplo.
@@ -256,14 +297,16 @@ export function buildAiPrompt(o: PromptOptions): string {
       'MINIEJEMPLO DE LA FORMA — 4 compases inventados, NO es tu respuesta.',
       ...(dif === 'facil'
         ? [
-            'Fijate que todos ocupan el compás entero y que el C se repite dos veces: así va.',
+            'Fijate en tres cosas: cada compás tiene UN SOLO acorde; los golpes NO duran todos',
+            'lo mismo (siguen a la melodía); y el último se sostiene en vez de repetirse.',
             ...(o.imponerMedida ? [] : ['BPM: 92', 'COMPAS: 4/4']),
-            `| C/${bpb} | C/${bpb} | F/${bpb} | G/${bpb} |`,
+            `| ${cierre} | ${Array(bpb).fill('C/1').join(' ')} | F/${bpb / 2} F/${bpb / 2} | G/${bpb} |`,
           ]
         : [
-            'Fijate que el tercero cambia de acorde en la mitad y los otros no.',
+            'Fijate que el tercero cambia de acorde en la mitad, los otros no, y que las',
+            'duraciones de los golpes son distintas entre sí porque siguen a la melodía.',
             ...(o.imponerMedida ? [] : ['BPM: 92', 'COMPAS: 4/4']),
-            `| C/${bpb} | Am/${bpb} | F/${bpb / 2} C/${bpb / 2} | G/${bpb} |`,
+            `| ${cierre} | Am/${bpb} | F/${bpb / 2} C/${bpb / 2} | G/${bpb} |`,
           ]),
     );
   } else {
@@ -305,8 +348,11 @@ export function buildAiPrompt(o: PromptOptions): string {
       : o.target === 'chords'
         ? [
             dif === 'facil'
-              ? '5. ¿Hay UN SOLO acorde en cada compás, ocupando el compás entero?'
-              : '5. ¿Ningún compás tiene más de DOS acordes, y los partidos son distintos entre sí?',
+              ? '5. ¿Hay UN SOLO acorde por compás (aunque se rasguee varias veces)?'
+              : '5. ¿Ningún compás tiene más de DOS acordes distintos?',
+            '6. ¿Los rasgueos siguen el ritmo de la melodía, o te quedaron todos de la misma',
+            '   duración? Si son todos iguales, es un metrónomo: volvé a mirar dónde sostiene',
+            '   la melodía y juntá esos golpes en uno solo más largo.',
           ]
         : []),
   );
@@ -418,6 +464,10 @@ function promptNivelCompleto(o: PromptOptions): string {
     ...(tocaAcordes
       ? [
           '',
+          ...RASGUEO,
+          '- Tenés la melodía delante porque la escribís vos en el mismo pedido: usala.',
+          '  Compás por compás, mirá el renglón MELODIA y copiá SU ritmo en el de ACORDES.',
+          '',
           ...reglasSubNivel(dif, permitidos),
           'Repito porque es el error más común: esto limita SOLO el renglón ACORDES.',
         ]
@@ -428,18 +478,24 @@ function promptNivelCompleto(o: PromptOptions): string {
     '',
     'FORMATO DE SALIDA',
     'Los tiempos se miden en TIEMPOS (beats): 1 = negra, .5 = corchea, 2 = blanca, 1.5 = con puntillo.',
-    '"r/1" es un silencio. "|" separa compases; poné una barra al final de cada compás.',
+    '"r/1" es un silencio. "~/1" es una ligadura: alarga lo anterior en vez de volver a tocarlo,',
+    'y sirve para que algo cruce la barra de compás ("F/3 | ~/3" dura seis tiempos).',
+    '"|" separa compases; poné una barra al final de cada compás.',
     'NO escribas tiempos de inicio ni números de compás: se calculan solos sumando las duraciones.',
     '',
-    'MINIEJEMPLO DE LA FORMA — son 3 compases inventados, NO es una canción ni es tu respuesta.',
-    'Está solo para que veas cómo se escribe: el primer compás es una anacrusa de un tiempo, el',
-    'bajo se mueve en vez de repetir la fundamental y el acompañamiento arpegia.',
+    'MINIEJEMPLO DE LA FORMA — una anacrusa y 4 compases inventados, NO es una canción ni es tu respuesta.',
+    'Está solo para que veas cómo se escribe. Mirá cuatro cosas: el primer compás es una',
+    'anacrusa de un tiempo; el bajo se mueve en vez de repetir la fundamental; el acompañamiento',
+    'arpegia; y los ACORDES siguen el ritmo de la MELODIA — dos golpes donde la melodía se mueve,',
+    'uno sostenido con ligadura donde la melodía sostiene.',
     'BPM: 120',
     'COMPAS: 3/4',
-    'MELODIA: | D4/1 | F4/1 A4/1.5 G4/.5 | E4/2 r/1 |',
-    'BAJO: | r/1 | D2/1 A2/1 F2/1 | C3/2 C3/1 |',
-    'ACOMP: | r/1 | r/1 [F3,A3]/1 [D4,F4]/1 | [E3,G3]/2 r/1 |',
-    ...(tocaAcordes ? ['ACORDES: | r/1 | F/3 | C/3 |'] : []),
+    'MELODIA: | D4/1 | F4/1 A4/1.5 G4/.5 | E4/2 F4/1 | A4/3 | ~/3 |',
+    'BAJO: | r/1 | D2/1 A2/1 F2/1 | C3/2 C3/1 | F2/1 A2/1 C3/1 | F2/1 C3/1 A2/1 |',
+    'ACOMP: | r/1 | r/1 [F3,A3]/1 [D4,F4]/1 | [E3,G3]/2 r/1 | [F3,A3]/1 C4/1 A3/1 | [F3,A3,C4]/3 |',
+    // Fijate que las duraciones de ACORDES son las MISMAS que las de MELODIA compás por
+    // compás. Es literalmente la regla, mostrada en vez de explicada.
+    ...(tocaAcordes ? ['ACORDES: | r/1 | F/1 F/1.5 F/.5 | C/2 C/1 | F/3 | ~/3 |'] : []),
     '',
     'ESCRIBÍ LA CANCIÓN ENTERA',
     'Ese miniejemplo tiene 3 compases porque muestra la forma, no porque las canciones duren eso.',
@@ -462,9 +518,12 @@ function promptNivelCompleto(o: PromptOptions): string {
     ...(tocaAcordes
       ? [
           dif === 'facil'
-            ? '5. En ACORDES, ¿hay UN SOLO acorde en cada compás, ocupando el compás entero?'
-            : '5. En ACORDES, ¿ningún compás tiene más de DOS acordes, y los partidos son distintos entre sí?',
+            ? '5. En ACORDES, ¿hay UN SOLO acorde por compás (aunque se rasguee varias veces)?'
+            : '5. En ACORDES, ¿ningún compás tiene más de DOS acordes distintos?',
           '6. ¿MELODIA, BAJO y ACOMP quedaron ricos, sin haberlos simplificado por el límite de acordes?',
+          '7. Compará ACORDES contra MELODIA compás por compás: ¿los golpes caen donde la melodía',
+          '   se mueve y se sostienen donde la melodía sostiene? Si en ACORDES te quedaron todas',
+          '   las duraciones iguales, está mal: eso es un metrónomo, no un rasgueo.',
         ]
       : [
           '5. En MELODIA, ¿TODAS las notas están entre C4 y A5? Es lo que el alumno puede tocar.',

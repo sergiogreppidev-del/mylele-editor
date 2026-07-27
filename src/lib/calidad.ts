@@ -14,6 +14,11 @@
       más veces hubo que corregir a mano: el bajo y el relleno repiten el mismo
       patrón en todos los compases y la canción no se reconoce. Eso se puede
       medir: si todos los compases tienen la misma forma, avisar.
+
+   3. ¿El RASGUEO sigue a la canción o al metrónomo? El mismo defecto, pero en
+      la capa que toca el alumno. Un golpe por tiempo de punta a punta obliga a
+      cortar el acorde justo donde la canción respira: el final de Estrellita
+      pide un Do sostenido y el juego mostraba dos Do seguidos.
    =================================================================== */
 
 import { beatsPerBar, tidy } from './chartFormat';
@@ -151,8 +156,34 @@ export function detectarMetronomo(
   pickup: number,
 ): Issue[] {
   const bpb = beatsPerBar(timeSig);
+
+  /* NO HAY FONDO — el caso que este control no miraba.
+     Estaba escrito para "el acompañamiento es mecánico" y arrancaba con
+     `if (acomp.length === 0) return []`: una canción SIN capa de fondo no daba ni un
+     aviso, que es peor que una mecánica. Sin fondo la app solo toca el metrónomo, y el
+     alumno rasguea acordes sueltos contra un clic — no hay canción.
+     Pasó de verdad: se cargaron once canciones de práctica con la capa de acordes y
+     nada más, y ningún control dijo nada hasta que alguien las jugó. */
+  if (backing.length === 0) {
+    return [
+      {
+        level: 'warn',
+        message:
+          'Este nivel no tiene capa de FONDO. La app va a tocar solo el metrónomo: el alumno rasguea contra un clic y no hay canción. Pedile a la IA la melodía, el bajo y el acompañamiento.',
+      },
+    ];
+  }
+
   const acomp = backing.filter((n) => (n.v ?? 'acomp') !== 'lead');
-  if (acomp.length === 0) return [];
+  if (acomp.length === 0) {
+    return [
+      {
+        level: 'warn',
+        message:
+          'El fondo tiene melodía pero no tiene bajo ni acompañamiento. Va a sonar a una sola voz suelta, no a un arreglo.',
+      },
+    ];
+  }
 
   const fin = acomp.reduce((m, n) => Math.max(m, n.t + n.dur), 0);
   // La anacrusa es un compás corto y siempre distinto: no entra en la comparación.
@@ -193,4 +224,52 @@ export function detectarMetronomo(
   }
 
   return out;
+}
+
+/* ---------------- ¿El rasgueo sigue a la canción? ---------------- */
+
+/**
+ * Avisa cuando la capa que toca el alumno es un golpe por tiempo de punta a punta.
+ *
+ * Este control faltaba, y su ausencia costó caro: las once canciones de práctica se
+ * cargaron con un rasgueo parejo y nadie dijo nada hasta que se jugaron. Lo que se
+ * escucha es que el juego te pide DOS golpes donde la canción sostiene UNO —el final
+ * de Estrellita es el caso claro— y hay que cortar el acorde para volver a golpear
+ * justo donde la música respira.
+ *
+ * NO mide cuántos golpes hay. Un rasgueo denso está perfecto si la melodía es densa;
+ * lo que delata el problema es que TODOS duren lo mismo, porque ninguna canción se
+ * mueve pareja de principio a fin.
+ *
+ * Se compara contra la melodía solo para el aviso más útil —"acá la melodía sostiene
+ * y vos golpeás dos veces"—, pero el aviso base no la necesita.
+ */
+export function detectarRasgueoMecanico(
+  chords: ChordEvent[],
+  melodia: NotaMelodica[],
+): Issue[] {
+  // Con pocos golpes no hay de dónde sacar una conclusión: cuatro acordes iguales
+  // pueden ser una intro, no un defecto.
+  if (chords.length < 8) return [];
+
+  const duraciones = new Set(chords.map((c) => tidy(c.dur)));
+  if (duraciones.size > 1) return [];
+
+  const dur = [...duraciones][0];
+  const base = `Los ${chords.length} rasgueos duran exactamente lo mismo (${dur} ${dur === 1 ? 'tiempo' : 'tiempos'} cada uno).`;
+
+  // Si tenemos la melodía, se puede señalar el lugar concreto donde molesta: una nota
+  // larga cubierta por varios golpes es exactamente el "dos Do en vez de uno".
+  const sostenida = melodia.find(
+    (n) => n.dur > dur + 0.001 && chords.filter((c) => solape(c.t, c.dur, n.t, n.dur) > 0.001).length > 1,
+  );
+
+  return [
+    {
+      level: 'warn',
+      message: sostenida
+        ? `${base} Eso es un metrónomo, no un rasgueo. Mirá el tiempo ${tidy(sostenida.t)}: la melodía sostiene ${tidy(sostenida.dur)} tiempos y el alumno tiene que golpear varias veces ahí, o sea cortar el acorde justo donde la canción respira. Pedile a la IA que el rasgueo siga el ritmo de la melodía.`
+        : `${base} Eso es un metrónomo, no un rasgueo: ninguna canción se mueve pareja de principio a fin. Pedile a la IA que el rasgueo siga el ritmo de la melodía —un golpe largo donde la melodía sostiene, varios donde se mueve.`,
+    },
+  ];
 }

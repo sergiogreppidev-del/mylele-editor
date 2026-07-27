@@ -301,17 +301,48 @@ console.log('\n=== El sub-nivel cambia la densidad de acordes ===');
   check('sin especificar, es el sub-nivel fácil', P.buildAiPrompt(base) === facil);
 
   check('fácil: exige uno por compás', /UN SOLO acorde por comp[aá]s/.test(facil));
-  check('fácil: prohíbe partir el compás', /prohibido partir un comp[aá]s en dos acordes/i.test(facil));
+  check('fácil: prohíbe DOS acordes distintos en el mismo compás',
+    /prohibido que en un mismo comp[aá]s haya DOS acordes distintos/i.test(facil));
   check('fácil: pide que el acorde dure dos compases', /DOS COMPASES O M[AÁ]S/.test(facil));
   check('fácil: le da una salida honesta si la canción no entra', /NOTA:/.test(facil));
-  check('fácil: el ejemplo no parte ningún compás', /\| C\/4 \| C\/4 \| F\/4 \| G\/4 \|/.test(facil));
-  check('fácil: no habla de dos por compás', !/DOS acordes por comp/.test(facil));
+  check('fácil: en esta etapa no hay rasgueos hacia arriba', /No uses ":u"/.test(facil));
 
-  check('difícil: permite partir el compás en dos', /partir un comp[aá]s en DOS acordes/.test(dificil));
+  check('difícil: permite cambiar en la mitad del compás',
+    /cambiar de acorde en la mitad del comp[aá]s/.test(dificil));
   check('difícil: no exige dos compases por acorde', !/DOS COMPASES O M[AÁ]S/.test(dificil));
   check('difícil: prohíbe tres o más', /Nunca tres o m[aá]s/.test(dificil));
-  check('difícil: el ejemplo parte un compás', /\| C\/4 \| Am\/4 \| F\/2 C\/2 \| G\/4 \|/.test(dificil));
-  check('difícil: los dos de un compás partido van distintos', /tienen que ser DISTINTOS/.test(dificil));
+  check('difícil: el ejemplo parte un compás', /\| Am\/4 \| F\/2 C\/2 \| G\/4 \|/.test(dificil));
+
+  /* ESTA REGLA SE DIO VUELTA, Y A PROPÓSITO.
+     Antes decía que "C/2 C/2" era un error, porque un elemento se leía como "un
+     acorde" en vez de como "un rasgueo". Con esa lectura, la única forma de escribir
+     un compás de Do era "C/4", y de ahí salía un golpe por compás de punta a punta.
+     Ahora "C/2 C/2" es lo correcto cuando la melodía se mueve en la mitad: son DOS
+     rasgueos del MISMO acorde. Lo que sigue prohibido son dos acordes DISTINTOS. */
+  check('ya no trata "C/2 C/2" como un error',
+    !/tienen que ser DISTINTOS/.test(dificil) && !/tienen que ser DISTINTOS/.test(facil));
+
+  /* EL RASGUEO SIGUE A LA MELODÍA — la corrección que motivó todo esto.
+     El pedido viejo pedía literalmente "en 4/4 son todos X/4", y eso obligaba a
+     cortar el acorde donde la canción sostiene. */
+  for (const [nombre, p] of [['fácil', facil], ['difícil', dificil]]) {
+    check(`${nombre}: ya no pide que todos ocupen el compás entero`,
+      !/en 4\/4 son todos "X\/4"/.test(p));
+    check(`${nombre}: explica que un elemento es UN rasgueo, no un acorde`,
+      /es UN rasgueo, y su duraci[oó]n es cu[aá]nto lo dej[aá]s sonar/.test(p));
+    check(`${nombre}: pide que el rasgueo siga a la melodía`,
+      /donde la melod[ií]a se MUEVE, se rasguea/.test(p));
+    check(`${nombre}: ofrece la ligadura para cruzar el compás`, /"F\/3 \| ~\/3"/.test(p));
+    check(`${nombre}: acepta silencios en el rasgueo`, /Los SILENCIOS valen/.test(p));
+    check(`${nombre}: aclara que el límite es de cambios, no de golpes`,
+      /NO limita cu[aá]ntas veces se rasguea/.test(p));
+    // El ejemplo tiene que MOSTRAR la regla: si todos los golpes duran lo mismo,
+    // el modelo copia el ejemplo y volvemos al metrónomo.
+    const ejemplo = /MINIEJEMPLO[\s\S]*?\n(\| [^\n]*\|)/.exec(p);
+    check(`${nombre}: el ejemplo no tiene todos los golpes iguales`,
+      !!ejemplo && new Set([...ejemplo[1].matchAll(/\/([\d.]+)/g)].map((m) => m[1])).size > 1,
+      ejemplo && ejemplo[1]);
+  }
 
   // Los acordes permitidos: el pedido tiene que nombrarlos, y solo esos.
   const soloFaciles = P.buildAiPrompt({ ...base, dificultad: 'facil', acordesPermitidos: ['Am', 'C', 'F'] });
@@ -327,12 +358,28 @@ console.log('\n=== El sub-nivel cambia la densidad de acordes ===');
   const nivelF = P.buildAiPrompt({ ...nivel, dificultad: 'facil' });
   const nivelD = P.buildAiPrompt({ ...nivel, dificultad: 'dificil' });
   check('nivel · fácil: uno por compás', /UN SOLO acorde por comp[aá]s/.test(nivelF));
-  check('nivel · difícil: permite partir el compás', /partir un comp[aá]s en DOS acordes/.test(nivelD));
+  check('nivel · difícil: permite cambiar en la mitad',
+    /cambiar de acorde en la mitad del comp[aá]s/.test(nivelD));
   check('nivel · el límite es solo de ACORDES', /SOLO el rengl[oó]n ACORDES/.test(nivelF));
   check('nivel · la música sigue sin límite en los dos',
     /ninguna limitaci[oó]n de dificultad/.test(nivelF) && /ninguna limitaci[oó]n de dificultad/.test(nivelD));
   check('nivel · la verificación final se adapta',
-    /UN SOLO acorde en cada comp[aá]s/.test(nivelF) && /m[aá]s de DOS acordes/.test(nivelD));
+    /UN SOLO acorde por comp[aá]s/.test(nivelF) && /m[aá]s de DOS acordes/.test(nivelD));
+
+  /* El pedido de nivel entero es el único que tiene la melodía delante mientras
+     escribe los acordes, así que es el único donde se puede pedir la comparación
+     directa. Es también el que más se usa. */
+  check('nivel · manda comparar ACORDES contra MELODIA compás por compás',
+    /copi[aá] SU ritmo en el de ACORDES/.test(nivelF));
+  check('nivel · la verificación final incluye el ritmo del rasgueo',
+    /Compar[aá] ACORDES contra MELODIA comp[aá]s por comp[aá]s/.test(nivelF));
+  check('nivel · el miniejemplo muestra una ligadura en ACORDES',
+    /ACORDES: .*~\/3/.test(nivelF), /ACORDES: [^\n]*/.exec(nivelF)?.[0]);
+  check('nivel · el miniejemplo de ACORDES no tiene todos los golpes iguales',
+    // Anclado al principio de renglón: la sección de reglas también tiene un
+    // "- ACORDES: ..." y ese no lleva ninguna duración.
+    new Set([...(/^ACORDES: ([^\n]*)/m.exec(nivelF)?.[1] ?? '').matchAll(/\/([\d.]+)/g)]
+      .map((m) => m[1])).size > 1);
   check('nivel · sigue pidiendo no simplificar la música por el límite',
     /sin haberlos simplificado por el l[ií]mite/.test(nivelF));
 }
@@ -598,9 +645,19 @@ console.log('\n=== Musica o metronomo ===');
 
   check('con pocos compases no saca conclusiones',
     Q.detectarMetronomo(clavado.slice(0, 8), '4/4', 0).length === 0);
-  check('sin acompanamiento no dice nada', Q.detectarMetronomo([], '4/4', 0).length === 0);
-  check('la melodia no cuenta como acompanamiento',
-    Q.detectarMetronomo(clavado.map((x) => ({ ...x, v: 'lead' })), '4/4', 0).length === 0);
+  /* OJO CON ESTAS DOS: antes decian lo contrario.
+     La prueba era `sin acompanamiento no dice nada`, y eso NO era una decision: era el
+     hueco del control escrito como si fuera lo deseado. Una cancion sin capa de fondo
+     es el peor caso posible —la app toca solo el metronomo y no hay cancion— y era
+     justo el unico que pasaba sin un aviso.
+     Se descubrio por las malas: once canciones de practica cargadas sin fondo, y ni el
+     editor ni las pruebas dijeron nada hasta que alguien las jugo. */
+  check('sin NADA de fondo avisa que va a sonar a metronomo',
+    Q.detectarMetronomo([], '4/4', 0).some((i) => /no tiene capa de FONDO/.test(i.message)));
+
+  check('con melodia pero sin bajo ni relleno tambien avisa',
+    Q.detectarMetronomo(clavado.map((x) => ({ ...x, v: 'lead' })), '4/4', 0)
+      .some((i) => /no tiene bajo ni acompanamiento|no tiene bajo/.test(i.message)));
 }
 
 /* ===================================================================
@@ -681,6 +738,95 @@ console.log('        fondo exportado:', textoB);
 const r10 = N.parseNotation(textoB, { target: 'backing', beatsPerBar: 3, knownChords: [] });
 check('el fondo también vuelve igual', JSON.stringify(r10.backingEvents) === JSON.stringify(r1.backingEvents),
   JSON.stringify(r10.backingEvents));
+
+/* =====================================================================
+   LIGADURA — que algo dure más de lo que queda del compás
+
+   Sin esto había que elegir entre cortar el acorde en la barra de compás
+   (y el alumno vuelve a rasguear donde la canción sostiene) o poner un
+   silencio (y se apaga antes). Es el bug del final de Estrellita.
+   ===================================================================== */
+console.log('\n=== Ligadura ===');
+{
+  const KC = ['C', 'Am', 'F', 'G'];
+  const lig = N.parseNotation('| F/3 | ~/3 | C/3 |', { target: 'chords', beatsPerBar: 3, knownChords: KC });
+  check('la ligadura alarga el rasgueo en vez de agregar otro', lig.chordEvents.length === 2,
+    JSON.stringify(lig.chordEvents));
+  check('el rasgueo ligado dura los seis tiempos',
+    lig.chordEvents[0].dur === 6 && lig.chordEvents[0].t === 0, JSON.stringify(lig.chordEvents));
+  check('lo que sigue arranca donde corresponde', lig.chordEvents[1].t === 6);
+  check('el compás de la ligadura suma bien y no da error',
+    !lig.issues.some((i) => i.level === 'error'), JSON.stringify(lig.issues.map((i) => i.message)));
+
+  // Sin la ligadura, ese mismo acorde de 6 tiempos hace estallar el compás.
+  const sinLig = N.parseNotation('| F/6 | C/3 |', { target: 'chords', beatsPerBar: 3, knownChords: KC });
+  check('escribirlo sin ligadura sí rompe el compás',
+    sinLig.issues.some((i) => i.level === 'error' && /suma 6/.test(i.message)),
+    JSON.stringify(sinLig.issues.map((i) => i.message)));
+
+  // En el fondo tiene que alargar TODAS las notas del acorde, no solo la última.
+  const ligPoli = N.parseNotation('| [C3,E3,G3]/3 | ~/3 |', { target: 'backing', beatsPerBar: 3, knownChords: [] });
+  check('la ligadura alarga las tres notas de un bloque',
+    ligPoli.backingEvents.length === 3 && ligPoli.backingEvents.every((e) => e.dur === 6),
+    JSON.stringify(ligPoli.backingEvents));
+
+  // Un silencio corta la ligadura: atar por encima uniría dos notas separadas.
+  const trasSilencio = N.parseNotation('| C4/1 r/1 ~/1 |', { target: 'backing', beatsPerBar: 3, knownChords: [] });
+  check('una ligadura después de un silencio avisa en vez de atar de más',
+    trasSilencio.issues.some((i) => i.level === 'error' && /ligadura/.test(i.message)),
+    JSON.stringify(trasSilencio.issues.map((i) => i.message)));
+  check('y no alarga la nota de antes del silencio',
+    trasSilencio.backingEvents.length === 1 && trasSilencio.backingEvents[0].dur === 1,
+    JSON.stringify(trasSilencio.backingEvents));
+
+  const sinNada = N.parseNotation('| ~/3 |', { target: 'chords', beatsPerBar: 3, knownChords: KC });
+  check('una ligadura sin nada antes avisa', sinNada.issues.some((i) => i.level === 'error'));
+
+  /* La ida y vuelta con acordes sostenidos NO cerraba: `toNotation` escribía el
+     evento largo entero y corría la barra de compás, y ese texto ya no se podía
+     volver a leer. Ahora lo parte con ligaduras. */
+  const largo = [{ t: 0, chord: 'F', dur: 6, dir: 'd' }, { t: 6, chord: 'C', dur: 3, dir: 'd' }];
+  const exportado = N.toNotation(largo, 3);
+  console.log('        con ligadura:', exportado);
+  check('al exportar, lo que cruza el compás sale con ligadura', /~\//.test(exportado), exportado);
+  const vuelta = N.parseNotation(exportado, { target: 'chords', beatsPerBar: 3, knownChords: KC });
+  check('y vuelve a leerse igual, sin errores de compás',
+    JSON.stringify(vuelta.chordEvents) === JSON.stringify(largo) && !vuelta.issues.some((i) => i.level === 'error'),
+    JSON.stringify(vuelta.chordEvents) + ' ' + JSON.stringify(vuelta.issues.map((i) => i.message)));
+}
+
+/* =====================================================================
+   RASGUEO MECÁNICO — el metrónomo, pero en la capa que toca el alumno
+   ===================================================================== */
+console.log('\n=== Rasgueo mecánico ===');
+{
+  const Q = require('./build/calidad.js');
+  const parejo = Array.from({ length: 12 }, (_, i) => ({ t: i, chord: 'C', dur: 1, dir: 'd' }));
+  check('doce golpes todos de un tiempo avisan',
+    Q.detectarRasgueoMecanico(parejo, []).some((i) => /metrónomo/.test(i.message)),
+    JSON.stringify(Q.detectarRasgueoMecanico(parejo, []).map((i) => i.message)));
+
+  // Con la melodía delante, el aviso tiene que señalar DÓNDE molesta.
+  const sostiene = [{ t: 10, dur: 2, midi: 60 }];
+  const conMelodia = Q.detectarRasgueoMecanico(parejo, sostiene);
+  check('el aviso señala el tiempo donde la melodía sostiene',
+    conMelodia.some((i) => /tiempo 10/.test(i.message)),
+    JSON.stringify(conMelodia.map((i) => i.message)));
+
+  // Lo que arregla el problema es que las duraciones dejen de ser todas iguales.
+  const conRespiro = [...parejo.slice(0, 10), { t: 10, chord: 'C', dur: 2, dir: 'd' }];
+  check('con un solo golpe sostenido ya no avisa',
+    Q.detectarRasgueoMecanico(conRespiro, []).length === 0,
+    JSON.stringify(Q.detectarRasgueoMecanico(conRespiro, []).map((i) => i.message)));
+
+  check('pocos golpes iguales no alcanzan para concluir nada',
+    Q.detectarRasgueoMecanico(parejo.slice(0, 6), []).length === 0);
+
+  // Un rasgueo denso NO es el problema: el problema es que sea parejo.
+  const denso = Array.from({ length: 16 }, (_, i) => ({ t: i * 0.5, chord: 'C', dur: 0.5, dir: 'd' }));
+  check('un rasgueo denso pero parejo también avisa',
+    Q.detectarRasgueoMecanico(denso, []).length === 1);
+}
 
 console.log('\n' + (fails === 0 ? '✓ TODO BIEN' : '✗ ' + fails + ' FALLAS'));
 process.exit(fails === 0 ? 0 : 1);
