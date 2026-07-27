@@ -566,19 +566,112 @@ console.log('\n=== La armonia calza con la melodia ===');
   const bien = Q.verificarArmonia([ac('C', 0, 4)], [no(0, 2, 60), no(2, 2, 64)], PCS);
   check('un acorde que contiene la melodia no da aviso', bien.length === 0);
 
-  // El mismo compas con un F: no comparte NINGUNA nota con lo que suena.
-  const mal = Q.verificarArmonia([ac('F', 0, 4)], [no(0, 2, 62), no(2, 2, 71)], PCS);
+  // Un F contra un Si: el Si es TRITONO contra el fa. Eso si es de otra cancion.
+  const mal = Q.verificarArmonia([ac('F', 0, 4)], [no(0, 4, 71)], PCS);
   check('detecta el acorde que no contiene ninguna nota', mal.length === 1 && mal[0].ninguna === true);
-  check('dice cuales son las notas que sobran', mal[0].ajenas.sort().join() === 'B,D');
+  check('dice cuales son las notas que sobran', mal[0].ajenas.join() === 'B');
 
   // Nota de paso corta: normal, no tiene que molestar.
-  const paso = Q.verificarArmonia([ac('C', 0, 4)], [no(0, 3.5, 60), no(3.5, 0.5, 62)], PCS);
+  const paso = Q.verificarArmonia([ac('C', 0, 4)], [no(0, 3.5, 60), no(3.5, 0.5, 61)], PCS);
   check('una nota de paso corta no da aviso', paso.length === 0);
 
-  // Mayoria ajena: aviso mas suave, no error.
-  const mayoria = Q.verificarArmonia([ac('C', 0, 4)], [no(0, 3, 62), no(3, 1, 60)], PCS);
+  // Mayoria ajena: aviso mas suave, no error. El Fa sobre Do es la 11a, que si
+  // choca con la tercera mayor — a diferencia de la 6a o la 9a, que no.
+  const mayoria = Q.verificarArmonia([ac('C', 0, 4)], [no(0, 3, 65), no(3, 1, 60)], PCS);
   check('si la mayoria queda afuera, avisa sin decir "ninguna"',
     mayoria.length === 1 && mayoria[0].ninguna === false);
+
+  /* =====================================================================
+     LA SEXTA, LA NOVENA Y LA SEPTIMA NO SON NOTAS AJENAS
+
+     Cielito lindo daba OCHO errores que impedian publicarla, y los ocho eran
+     de este tipo: una triada tiene tres notas y cualquier melodia de verdad
+     pasa todo el tiempo por notas que no son ninguna de esas tres.
+
+     Las dos pruebas de arriba se reescribieron porque afirmaban lo contrario:
+     una usaba un Re sobre Do (novena) como ejemplo de "nota que sobra", y es
+     justo lo que canta el compas 2 de Cielito lindo.
+     ===================================================================== */
+  const consonantes = [
+    ['la 6a sobre mayor (el "ay" de Cielito lindo: La sobre Do)', 'C', 69],
+    ['la 9a sobre mayor (Re sobre Do)', 'C', 62],
+    ['la 6a sobre F (Re sobre Fa)', 'F', 62],
+    ['la 9a sobre G (La sobre Sol)', 'G', 69],
+    ['la 7a menor sobre G (Fa sobre Sol: es el G7 de la partitura)', 'G', 65],
+    ['la 7a menor sobre menor (Sol sobre Am)', 'Am', 67],
+    ['la 11a sobre menor (Re sobre Am)', 'Am', 62],
+  ];
+  for (const [nombre, acorde, midi] of consonantes) {
+    check(`${nombre} no da aviso`,
+      Q.verificarArmonia([ac(acorde, 0, 4)], [no(0, 4, midi)], PCS).length === 0,
+      JSON.stringify(Q.verificarArmonia([ac(acorde, 0, 4)], [no(0, 4, midi)], PCS)));
+  }
+
+  // Pero las que chocan de verdad tienen que seguir avisando.
+  const chocan = [
+    ['la 2a menor sobre Do (Do#)', 'C', 61],
+    ['la 11a sobre mayor, que pelea con la tercera (Fa sobre Do)', 'C', 65],
+    ['el tritono (Fa# sobre Do)', 'C', 66],
+    ['la tercera mayor sobre un menor (Do# sobre Am)', 'Am', 61],
+  ];
+  for (const [nombre, acorde, midi] of chocan) {
+    const r = Q.verificarArmonia([ac(acorde, 0, 4)], [no(0, 4, midi)], PCS);
+    check(`${nombre} sigue siendo un error`, r.length === 1 && r[0].ninguna === true,
+      JSON.stringify(r));
+  }
+
+  /* =====================================================================
+     LA ARMONIA SE JUZGA POR COMPAS, NO POR RASGUEO
+
+     Esto funcionaba cuando un compas tenia un acorde y punto. Desde que el
+     rasgueo sigue el ritmo de la melodia hay un golpe por nota, y entonces
+     aparece un rasgueo que cubre UNA SOLA nota — si esa nota es de paso, el
+     control decia "el acorde no contiene NINGUNA nota de la melodia".
+
+     El caso real: el compas 2 del Himno a la alegria canta Sol Fa Mi Re sobre
+     un Do. Tres de las cuatro notas cierran; el Fa es de paso.
+     ===================================================================== */
+  const M = { beatsPerBar: 4, pickup: 0 };
+  const alegria = Q.verificarArmonia(
+    [ac('C', 0, 1), ac('C', 1, 1), ac('C', 2, 1), ac('G', 3, 1)],
+    [no(0, 1, 67), no(1, 1, 65), no(2, 1, 64), no(3, 1, 62)], // Sol Fa Mi Re
+    PCS, M);
+  check('una nota de paso bajo su propio rasgueo ya no es un error',
+    alegria.length === 0, JSON.stringify(alegria));
+
+  // Y sin agrupar por compas, ese mismo caso daba el falso error.
+  const sinAgrupar = Q.verificarArmonia([ac('C', 1, 1)], [no(1, 1, 65)], PCS, M);
+  check('el rasgueo suelto sobre la nota de paso, aislado, si es un error',
+    sinAgrupar.length === 1 && sinAgrupar[0].ninguna === true, JSON.stringify(sinAgrupar));
+
+  // Un compas entero equivocado se sigue detectando: es para lo que existe.
+  const corrido = Q.verificarArmonia(
+    [ac('C', 0, 1), ac('C', 1, 1), ac('C', 2, 2)],
+    [no(0, 2, 66), no(2, 2, 61)], // Fa# y Do#: nada que ver con Do
+    PCS, M);
+  check('un compas entero con el acorde equivocado sigue siendo error',
+    corrido.length === 1 && corrido[0].ninguna === true, JSON.stringify(corrido));
+
+  // Y no se mezclan dos compases distintos en un solo juicio.
+  const dosCompases = Q.verificarArmonia(
+    [ac('C', 0, 4), ac('C', 4, 4)],
+    [no(0, 4, 60), no(4, 4, 66)], // el compas 1 cierra, el 2 no
+    PCS, M);
+  check('el compas bueno no le tapa el problema al malo',
+    dosCompases.length === 1 && dosCompases[0].t === 4, JSON.stringify(dosCompases));
+
+  // Un acorde que cruza la barra de compas se parte y se juzga por separado.
+  const cruzado = Q.verificarArmonia(
+    [ac('C', 0, 8)], [no(0, 4, 60), no(4, 4, 66)], PCS, M);
+  check('un acorde que cruza el compas se juzga compas por compas',
+    cruzado.length === 1 && cruzado[0].t === 4, JSON.stringify(cruzado));
+
+  // Y el aviso ya no puede salir repetido, porque hay uno solo por compas.
+  const repetido = Q.avisosDeArmonia(
+    Q.verificarArmonia([ac('C', 0, 1), ac('C', 1, 1), ac('C', 2, 2)], [no(0, 4, 66)], PCS, M),
+    '4/4', 0);
+  check('tres rasgueos con el mismo problema dan UN solo aviso', repetido.length === 1,
+    JSON.stringify(repetido.map((i) => i.message)));
 
   // Sin melodia no se puede juzgar nada.
   check('sin melodia no inventa avisos', Q.verificarArmonia([ac('C', 0, 4)], [], PCS).length === 0);

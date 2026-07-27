@@ -69,6 +69,19 @@ Están todas cubiertas por pruebas. Si tocás algo de esto, corré `npm run prob
   cuánto CAMBIA el acorde — no cuántas veces se rasguea. Por eso `C/2 C/2` pasó de ser un
   error a ser correcto: son dos golpes del mismo acorde. Lo cubre `detectarRasgueoMecanico`
   en `calidad.ts`, que avisa cuando **todos** los golpes duran lo mismo.
+- **La armonía se juzga por COMPÁS, no por rasgueo.** Es el corolario del punto anterior y
+  costó ocho errores que impedían publicar Cielito lindo. Con un golpe por nota, aparece un
+  rasgueo que cubre UNA SOLA nota de la melodía; si esa nota es de paso, preguntar «¿este
+  acorde contiene esa nota?» da que no, y el aviso decía «no contiene NINGUNA nota de la
+  melodía». El compás 2 del Himno a la alegría canta Sol Fa Mi Re sobre un Do: entero
+  cierra, golpe a golpe no. `verificarArmonia` agrupa los rasgueos del mismo acorde dentro
+  del mismo compás, y parte en la barra los que la cruzan.
+- **La sexta, la novena y la séptima NO son notas ajenas.** Una tríada tiene tres notas y
+  cualquier melodía de verdad pasa todo el tiempo por otras. El «ay» de Cielito lindo es un
+  La sobre Do (sexta) y el Fa sobre Sol que se marcaba como ajeno es, literalmente, el G7
+  de la partitura original. Se miden como intervalos desde la FUNDAMENTAL —la primera de
+  `pitch_classes`—, no por cercanía a la nota más próxima del acorde: el Si sobre Fa está a
+  dos semitonos del La y sin embargo es un tritono contra la fundamental.
 - **La ligadura `~/1`.** Alarga lo anterior en vez de volver a tocarlo, y es la única forma
   de que algo cruce la barra de compás: `F/3 | ~/3` es un evento de seis tiempos.
   Se eligió `~` y no `-` porque el guion ya es uno de los nombres del silencio.

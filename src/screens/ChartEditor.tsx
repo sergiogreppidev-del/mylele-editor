@@ -215,8 +215,9 @@ export function ChartEditor({ songId, nuevoModo, chords, canEdit, onBack, onRelo
     if (mode !== 'chords') return [];
     const pcs: Record<string, number[]> = {};
     chords.forEach((c) => (pcs[c.id] = c.pitch_classes));
-    return verificarArmonia(events, melodiaDelNivel(melody, backingNotes), pcs);
-  }, [mode, events, melody, backingNotes, chords]);
+    return verificarArmonia(events, melodiaDelNivel(melody, backingNotes), pcs,
+      { beatsPerBar: bpb, pickup: song.pickup_beats });
+  }, [mode, events, melody, backingNotes, chords, bpb, song.pickup_beats]);
 
   const armoniaIssues = useMemo(
     () => avisosDeArmonia(choques, song.time_sig, song.pickup_beats),

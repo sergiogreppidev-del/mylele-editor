@@ -56,7 +56,7 @@ export interface ChoqueArmonico {
   t: number;
   /** Ninguna nota de la melodía pertenece al acorde. Casi siempre está corrido. */
   ninguna: boolean;
-  /** Notas que suenan durante el acorde y no le pertenecen. */
+  /** Notas que suenan durante el acorde y le son de verdad ajenas. */
   ajenas: string[];
 }
 
@@ -67,53 +67,155 @@ function solape(aT: number, aDur: number, bT: number, bDur: number): number {
   return Math.max(0, Math.min(aT + aDur, bT + bDur) - Math.max(aT, bT));
 }
 
+/* LAS NOTAS QUE NO SON DEL ACORDE PERO SUENAN BIEN IGUAL
+   ------------------------------------------------------
+   Una tríada tiene tres notas, y la melodía de cualquier canción de verdad pasa
+   todo el tiempo por notas que no son ninguna de esas tres. La sexta, la novena
+   y la séptima son las más comunes y son CONSONANTES: no delatan ningún error.
+
+   Esto no era teoría: Cielito lindo daba OCHO errores que impedían publicarla, y
+   los ocho eran de este tipo. El «ay» sostenido es un La sobre Do —una sexta— y
+   el control decía «el acorde Do no contiene NINGUNA nota de la melodía». El Fa
+   sobre Sol que marcaba como ajeno es, literalmente, el G7 de la transcripción
+   original. La canción estaba bien; el control estaba mal.
+
+   Se miden como intervalos desde la FUNDAMENTAL, que es la primera de
+   `pitch_classes`. Contar «a cuántos semitonos está de la nota más cercana del
+   acorde» no sirve: el Si sobre Fa está a dos semitonos del La, y sin embargo es
+   un tritono contra la fundamental. */
+const CONSONANTES_MAYOR = new Set([2, 9, 10, 11]); // 9ª, 6ª, 7ª menor, 7ª mayor
+const CONSONANTES_MENOR = new Set([2, 5, 9, 10]); // 9ª, 11ª, 6ª dórica, 7ª menor
+
 /**
- * ¿Cada acorde contiene lo que canta la melodía mientras dura?
+ * Corta un evento en pedazos, uno por compás, y le pone a cada uno su número de
+ * compás (−1 = la anacrusa). Un acorde puede durar más que un compás: el «ay» de
+ * Cielito lindo es un solo rasgueo de seis tiempos.
+ */
+function porCompas(
+  t: number,
+  dur: number,
+  bpb: number,
+  pickup: number,
+): { compas: number; t: number; dur: number }[] {
+  const out: { compas: number; t: number; dur: number }[] = [];
+  let cursor = t;
+  const fin = t + dur;
+  while (cursor < fin - 0.001) {
+    const compas = cursor < pickup ? -1 : Math.floor((cursor - pickup) / bpb);
+    const corte = compas < 0 ? pickup : pickup + (compas + 1) * bpb;
+    const hasta = Math.min(fin, corte);
+    out.push({ compas, t: cursor, dur: hasta - cursor });
+    cursor = hasta;
+  }
+  return out;
+}
+
+/**
+ * ¿Cada acorde calza con lo que canta la melodía mientras dura?
  *
  * Se pesa por duración, no por cantidad de notas: una nota de paso corta que no
  * pertenece al acorde es normal y no tiene que dar aviso; lo que delata un error
  * es que la mayor parte de lo que suena sea ajeno.
+ *
+ * Tres categorías, no dos:
+ *   propia  — es una nota del acorde
+ *   vecina  — no lo es, pero es una extensión consonante (ver arriba)
+ *   ajena   — choca de verdad: segunda menor, tritono, la tercera cambiada
+ *
+ * LO QUE SE JUZGA ES «EL DO DE ESTE COMPÁS», NO CADA RASGUEO
+ * ----------------------------------------------------------
+ * Antes se miraba evento por evento, y eso funcionaba cuando un compás tenía un
+ * acorde y punto. Desde que el rasgueo sigue el ritmo de la melodía hay un golpe
+ * por nota, y entonces aparece un rasgueo que cubre UNA SOLA nota de la melodía.
+ * Si esa nota es de paso, el control decía «el acorde Do no contiene NINGUNA nota
+ * de la melodía» — y tenía razón sobre ese rasgueo suelto, pero la pregunta estaba
+ * mal hecha: la armonía no se juzga golpe a golpe.
+ *
+ * El compás 2 del Himno a la alegría canta Sol Fa Mi Re sobre un Do. Mirado
+ * entero, tres de las cuatro notas cierran. Mirado rasgueo por rasgueo, el
+ * segundo golpe solo ve el Fa y parece un error.
  */
 export function verificarArmonia(
   chords: ChordEvent[],
   melodia: NotaMelodica[],
   chordPcs: Record<string, number[]>,
+  medida: { beatsPerBar: number; pickup: number } = { beatsPerBar: 4, pickup: 0 },
 ): ChoqueArmonico[] {
   if (melodia.length === 0) return [];
-  const out: ChoqueArmonico[] = [];
+
+  // Los rasgueos del mismo acorde dentro del mismo compás son UNA sola cosa.
+  const grupos = new Map<
+    string,
+    { index: number; chord: string; t: number; tramos: { t: number; dur: number }[] }
+  >();
 
   chords.forEach((c, index) => {
-    const pcs = chordPcs[c.chord];
-    if (!pcs || pcs.length === 0) return;
+    if (!chordPcs[c.chord]?.length) return;
+    for (const tr of porCompas(c.t, c.dur, medida.beatsPerBar, medida.pickup)) {
+      const clave = `${tr.compas}|${c.chord}`;
+      const ya = grupos.get(clave);
+      if (ya) ya.tramos.push(tr);
+      else grupos.set(clave, { index, chord: c.chord, t: tr.t, tramos: [tr] });
+    }
+  });
+
+  const out: ChoqueArmonico[] = [];
+
+  for (const g of grupos.values()) {
+    const pcs = chordPcs[g.chord];
     const suyas = new Set(pcs.map((p) => ((p % 12) + 12) % 12));
 
+    // La fundamental es la primera de `pitch_classes`, y la tercera dice si el
+    // acorde es mayor o menor: sobre un menor la 11ª suena bien (no hay tercera
+    // mayor con la que chocar) y la tercera mayor sí molesta.
+    const fundamental = ((pcs[0] % 12) + 12) % 12;
+    const tercera = pcs.length > 1 ? (((pcs[1] - pcs[0]) % 12) + 12) % 12 : 4;
+    const consonantes = tercera === 3 ? CONSONANTES_MENOR : CONSONANTES_MAYOR;
+
     let propio = 0;
+    let vecino = 0;
     let ajeno = 0;
     const ajenas = new Set<string>();
 
     for (const n of melodia) {
-      const cuanto = solape(c.t, c.dur, n.t, n.dur);
+      let cuanto = 0;
+      for (const tr of g.tramos) cuanto += solape(tr.t, tr.dur, n.t, n.dur);
       if (cuanto <= 0.001) continue;
       const pc = ((n.midi % 12) + 12) % 12;
       if (suyas.has(pc)) propio += cuanto;
+      else if (consonantes.has((pc - fundamental + 12) % 12)) vecino += cuanto;
       else {
         ajeno += cuanto;
         ajenas.add(NOMBRES[pc]);
       }
     }
 
-    if (propio + ajeno <= 0.001) return; // no hay melodía acá: nada que decir
-    if (propio <= 0.001) {
-      out.push({ index, chord: c.chord, t: c.t, ninguna: true, ajenas: [...ajenas] });
-    } else if (ajeno > propio) {
-      out.push({ index, chord: c.chord, t: c.t, ninguna: false, ajenas: [...ajenas] });
-    }
-  });
+    if (propio + vecino + ajeno <= 0.001) continue; // no hay melodía acá: nada que decir
 
-  return out;
+    if (propio <= 0.001 && vecino <= 0.001) {
+      // Ni una nota del acorde ni una extensión consonante: o está corrido, o es
+      // de otra versión de la canción.
+      out.push({ index: g.index, chord: g.chord, t: g.t, ninguna: true, ajenas: [...ajenas] });
+    } else if (ajeno > propio + vecino) {
+      // La melodía pasa más tiempo chocando que calzando. Tiene que ser MÁS, no
+      // empatar: una corchea de paso contra una negra buena empata, y avisar de
+      // eso es ruido.
+      out.push({ index: g.index, chord: g.chord, t: g.t, ninguna: false, ajenas: [...ajenas] });
+    }
+  }
+
+  return out.sort((a, b) => a.t - b.t);
 }
 
-/** Los choques, traducidos a avisos, ubicados por compás para poder ir a mirarlos. */
+/**
+ * Los choques, traducidos a avisos, ubicados por compás para poder ir a mirarlos.
+ *
+ * Hay como mucho UN aviso por compás y por acorde, porque así los agrupa
+ * `verificarArmonia`. Antes salía uno por RASGUEO y la lista mostraba dos veces
+ * seguidas la misma frase, palabra por palabra: leído por alguien que no escribió
+ * el código, eso no parece «dos golpes con el mismo problema», parece que la app
+ * se equivocó y repitió el renglón.
+ */
 export function avisosDeArmonia(
   choques: ChoqueArmonico[],
   timeSig: string,
