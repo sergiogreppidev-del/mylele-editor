@@ -4,13 +4,14 @@ Guía para trabajar en este repo con Claude Code. El usuario (fundador) **no es 
 explicá en lenguaje claro y no asumas que va a leer el código.
 
 > La guía del producto entero está en el repo hermano: `../MuLulu/CLAUDE.md`.
-> Ahí está la app de alumnos, el esquema de Supabase y las decisiones de audio.
-> **Los dos repos comparten la misma base**, así que un cambio de esquema toca los dos.
+> Ahí está el esquema de Supabase, el plan de progresión y las decisiones de audio.
+> La app de alumnos vive en un tercer repo: `../mylele-android` (Flutter + motor C++).
+> **Los tres comparten la misma base**, así que un cambio de esquema toca a los tres.
 
 ## Qué es
 
 App web para crear, probar y publicar los niveles de MyLele sin escribir SQL.
-Repo y proyecto de Vercel propios, mismo Supabase que la app de alumnos.
+Repo y proyecto de Vercel propios, mismo Supabase que la app de alumnos (`../mylele-android`).
 
 **React + Vite + TypeScript.** `sergiogreppidev-del/mylele-editor` → Vercel en cada push.
 
@@ -37,7 +38,7 @@ todos los errores graves que tuvo este editor vivieron en la lógica sin cubrir.
 | `lib/estructura.ts` | Repetir y duplicar compases, en todas las capas |
 | `lib/aiPrompt.ts` | Arma el pedido para la IA |
 | `lib/chordTheory.ts` | Nombre de acorde → notas, y verificación contra la digitación |
-| `lib/previewAudio.ts` | Reproducción de prueba (portada de `game.js` de la app de alumnos) |
+| `lib/previewAudio.ts` | Reproducción de prueba (portada del `game.js` de la app web, ya eliminada) |
 | `lib/db.ts` | Todas las consultas a Supabase. Envoltorio fino sobre `chartPick` |
 
 Las pantallas (`screens/`) arman la interfaz y no deciden nada que se pueda probar aparte.
@@ -131,7 +132,7 @@ en `package.json`.
 - El depósito `backing` de Storage deja listar los archivos. Hoy no expone nada
   (está vacío), pero conviene cerrarlo **con un audio de prueba cargado**, para
   comprobar en el momento que la reproducción sigue andando.
-- **En la app de alumnos** (`../MuLulu/content.js`): `dificultadPara()` quedó vestigial.
-  Pide siempre `'facil'` y lo salva un plan B que es `jugables[0]` — el mismo patrón
-  "el primero de la lista" que ya nos mordió. Ahora que una canción vive en un solo
-  sub-nivel, esa función sobra.
+- **El modelo de sub-nivel quedó desalineado con las etapas.** `PERFILES` limita el
+  sub-nivel Fácil a los **3** acordes que menos dedos piden, pero la etapa Fácil del
+  recorrido usa **4** (C, Am, F, G). Por eso nueve de las once canciones cargadas avisan
+  "usa además G". No bloquea publicar, pero es ruido constante y hay que alinearlo.
