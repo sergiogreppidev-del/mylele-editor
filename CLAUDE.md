@@ -3,7 +3,7 @@
 Guía para trabajar en este repo con Claude Code. El usuario (fundador) **no es técnico**:
 explicá en lenguaje claro y no asumas que va a leer el código.
 
-> La guía del producto entero está en el repo hermano: `../MuLulu/CLAUDE.md`.
+> La guía del producto entero está en el repo hermano: `../mylele-docs/CLAUDE.md`.
 > Ahí está el esquema de Supabase, el plan de progresión y las decisiones de audio.
 > La app de alumnos vive en un tercer repo: `../mylele-android` (Flutter + motor C++).
 > **Los tres comparten la misma base**, así que un cambio de esquema toca a los tres.
